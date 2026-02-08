@@ -1,71 +1,49 @@
 import amqp, { Channel, Connection } from 'amqplib';
+import { logger } from '@repolens/shared-utils';
 
-import { createLogger } from '@repolens/shared-utils';
-
-type LoggerLike = {
-  warn: (obj: unknown, msg?: string) => void;
-  error: (obj: unknown, msg?: string) => void;
-};
-
-const defaultLogger = createLogger({ level: process.env.LOG_LEVEL ?? 'info' });
-
-let connection: Connection | null = null;
-let channel: Channel | null = null;
-let channelPromise: Promise<Channel> | null = null;
+let connection: Connection | undefined;
+let channel: Channel | undefined;
 
 /** Creates and caches a RabbitMQ channel using the Promise-based API. */
-export const getRabbitChannel = async (
-  url: string,
-  logger: LoggerLike = defaultLogger,
-): Promise<Channel> => {
+/** Creates and caches a RabbitMQ channel using the Promise-based API. */
+export const getRabbitChannel = async (rabbitUrl: string): Promise<Channel> => {
   if (channel) return channel;
-  if (channelPromise) return channelPromise;
 
-  channelPromise = (async () => {
-    try {
-      connection = await amqp.connect(url);
-      channel = await connection.createChannel();
+  logger.info({ rabbitUrl }, 'Connecting to RabbitMQ...');
+  connection = await amqp.connect(rabbitUrl);
+  channel = await connection.createChannel();
 
-      connection.on('close', () => {
-        logger.warn({}, 'RabbitMQ connection closed');
-        connection = null;
-        channel = null;
-        channelPromise = null;
-      });
+  connection.on('close', () => {
+    logger.warn('RabbitMQ connection closed');
+    connection = undefined;
+    channel = undefined;
+  });
 
-      connection.on('error', (err) => {
-        logger.error({ err }, 'RabbitMQ connection error');
-      });
+  connection.on('error', (err) => {
+    logger.error({ err }, 'RabbitMQ connection error');
+  });
 
-      return channel;
-    } catch (error) {
-      connection = null;
-      channel = null;
-      channelPromise = null;
-      throw error;
-    }
-  })();
-
-  return channelPromise;
+  return channel;
 };
 
 export const closeRabbit = async (): Promise<void> => {
-  try {
-    if (channel) {
+  if (channel) {
+    try {
       await channel.close();
+    } catch {
+      // ignore
+    } finally {
+      channel = undefined;
     }
-  } catch {
-  } finally {
-    channel = null;
-    channelPromise = null;
   }
 
-  try {
-    if (connection) {
+  if (connection) {
+    try {
       await connection.close();
+    } catch {
+      // ignore
+    } finally {
+      connection = undefined;
     }
-  } catch {
-  } finally {
-    connection = null;
   }
 };
