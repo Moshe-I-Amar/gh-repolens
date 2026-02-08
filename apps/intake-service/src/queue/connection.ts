@@ -1,4 +1,4 @@
-import amqp, { Channel, Connection } from 'amqplib';
+import { Channel, Connection, connect } from 'amqplib';
 import { createLogger } from '@repolens/shared-utils';
 
 let connection: Connection | undefined;
@@ -20,7 +20,7 @@ export const getRabbitChannel = async (
   if (channel) return channel;
 
   logger.info({ rabbitUrl }, 'Connecting to RabbitMQ...');
-  const activeConnection = await amqp.connect(rabbitUrl);
+  const activeConnection = await connect(rabbitUrl);
   const activeChannel = await activeConnection.createChannel();
   connection = activeConnection;
   channel = activeChannel;
