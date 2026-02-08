@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: repolens-config
+data:
+  MONGODB_URI: mongodb://mongodb:27017/repolens
+  RABBITMQ_URL: amqp://rabbitmq:5672
+  WORKSPACES_ROOT: /workspaces
+  LOG_LEVEL: info
+  ZIP_SIZE_LIMIT_MB: '200'
+  ZIP_FILE_COUNT_LIMIT: '50000'
+  DOWNLOAD_TIMEOUT_MS: '300000'
+  EXTRACT_TIMEOUT_MS: '300000'
+  REVIEW_TIMEOUT_MS: '600000'

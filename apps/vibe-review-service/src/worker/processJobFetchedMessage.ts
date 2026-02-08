@@ -41,7 +41,11 @@ export const processJobFetchedMessage = async (payload: { jobId?: string; localP
     job.reviewResults = reviewResults;
     await job.save();
   } catch (error) {
-    const partial = await formatAndStoreResults(jobId, job.reviewResults?.questions ?? []);
+    const partialAnswers =
+      (error as Error & { partialResults?: typeof job.reviewResults?.questions }).partialResults ??
+      job.reviewResults?.questions ??
+      [];
+    const partial = await formatAndStoreResults(jobId, partialAnswers);
     job.reviewResults = partial;
     job.status = 'FAILED';
     job.error = 'REVIEW_FAILED';

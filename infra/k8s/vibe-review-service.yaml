@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vibe-review-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vibe-review-service
+  template:
+    metadata:
+      labels:
+        app: vibe-review-service
+    spec:
+      containers:
+        - name: vibe-review-service
+          image: repolens/vibe-review-service:local
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: repolens-config
+          volumeMounts:
+            - name: workspaces
+              mountPath: /workspaces
+      volumes:
+        - name: workspaces
+          emptyDir: {}

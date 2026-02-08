@@ -1,0 +1,34 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-client
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: web-client
+  template:
+    metadata:
+      labels:
+        app: web-client
+    spec:
+      containers:
+        - name: web-client
+          image: repolens/web-client:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5173
+          env:
+            - name: VITE_API_BASE_URL
+              value: http://intake-service:3001
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-client
+spec:
+  selector:
+    app: web-client
+  ports:
+    - port: 5173
+      targetPort: 5173

@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: repo-fetcher-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: repo-fetcher-service
+  template:
+    metadata:
+      labels:
+        app: repo-fetcher-service
+    spec:
+      containers:
+        - name: repo-fetcher-service
+          image: repolens/repo-fetcher-service:local
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: repolens-config
+          volumeMounts:
+            - name: workspaces
+              mountPath: /workspaces
+      volumes:
+        - name: workspaces
+          emptyDir: {}

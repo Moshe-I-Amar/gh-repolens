@@ -49,9 +49,21 @@ export const resolveDefaultBranch = async (
   const repo = match[2].replace(/\.git$/, '');
   const apiUrl = `https://api.github.com/repos/${owner}/${repo}`;
 
-  return withTimeout(fetchJson(apiUrl, timeoutMs), timeoutMs, 'GITHUB_API')
-    .then((payload: { default_branch?: string }) => payload.default_branch ?? 'main')
-    .catch(() => 'main');
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const payload = (await withTimeout(
+        fetchJson(apiUrl, timeoutMs),
+        timeoutMs,
+        'GITHUB_API',
+      )) as { default_branch?: string };
+      return payload.default_branch ?? 'main';
+    } catch (error) {
+      logger.error({ error, attempt }, 'Failed to resolve default branch');
+      await sleep(Math.min(1000 * 2 ** attempt, 8000));
+    }
+  }
+
+  return 'main';
 };
 
 const downloadWithRetry = async (url: string, attempts: number, timeoutMs: number) => {

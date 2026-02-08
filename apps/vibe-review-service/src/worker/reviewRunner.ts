@@ -10,6 +10,16 @@ const logger = createLogger({ level: process.env.LOG_LEVEL ?? 'info' });
 
 const MAX_FILE_BYTES = 200 * 1024;
 const MAX_FILES = 20;
+const REVIEW_TIMEOUT_MS = Number(process.env.REVIEW_TIMEOUT_MS ?? 600000);
+
+const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number, label: string) => {
+  return Promise.race([
+    promise,
+    new Promise<T>((_resolve, reject) =>
+      setTimeout(() => reject(new Error(`${label}_TIMEOUT`)), timeoutMs),
+    ),
+  ]);
+};
 
 const readFileSafe = async (filePath: string) => {
   try {
@@ -117,23 +127,33 @@ export const formatAndStoreResults = async (jobId: string, results: ReviewAnswer
 export const runReviewForJob = async (repoRoot: string): Promise<ReviewAnswer[]> => {
   const answers: ReviewAnswer[] = [];
 
-  for (const question of reviewQuestions) {
-    const context = await getContextForQuestion(repoRoot, question.id);
-    const answer = `Summary: Automated review placeholder for ${summarizeQuestion(question.id)}.
+  const run = async () => {
+    for (const question of reviewQuestions) {
+      try {
+        const context = await getContextForQuestion(repoRoot, question.id);
+        const answer = `Summary: Automated review placeholder for ${summarizeQuestion(question.id)}.
 Findings: Context files collected (${context.files.length}).
 Risk/Severity: LOW.
 File references: ${context.files.map((file) => file.path).join(', ') || 'N/A'}.
 Suggested fix: Replace placeholder with Codex review.`;
 
-    answers.push({
-      id: question.id,
-      title: question.title,
-      category: question.category,
-      severity: 'LOW',
-      answer,
-      refs: context.files.map((file) => ({ path: file.path })),
-    });
-  }
+        answers.push({
+          id: question.id,
+          title: question.title,
+          category: question.category,
+          severity: 'LOW',
+          answer,
+          refs: context.files.map((file) => ({ path: file.path })),
+        });
+      } catch (error) {
+        const partialError = new Error('REVIEW_QUESTION_FAILED');
+        (partialError as Error & { partialResults?: ReviewAnswer[] }).partialResults = answers;
+        logger.error({ error, questionId: question.id }, 'Question review failed');
+        throw partialError;
+      }
+    }
+  };
 
+  await withTimeout(run(), REVIEW_TIMEOUT_MS, 'REVIEW');
   return answers;
 };

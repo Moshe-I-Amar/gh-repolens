@@ -1,0 +1,82 @@
+version: '3.9'
+
+services:
+  mongodb:
+    image: mongo:7
+    restart: unless-stopped
+    ports:
+      - '27017:27017'
+    volumes:
+      - mongo-data:/data/db
+
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    restart: unless-stopped
+    ports:
+      - '5672:5672'
+      - '15672:15672'
+
+  intake-service:
+    build:
+      context: ../..
+      dockerfile: apps/intake-service/Dockerfile
+    environment:
+      PORT: '3001'
+      MONGODB_URI: mongodb://mongodb:27017/repolens
+      RABBITMQ_URL: amqp://rabbitmq:5672
+      LOG_LEVEL: info
+    ports:
+      - '3001:3001'
+    depends_on:
+      - mongodb
+      - rabbitmq
+
+  repo-fetcher-service:
+    build:
+      context: ../..
+      dockerfile: apps/repo-fetcher-service/Dockerfile
+    environment:
+      MONGODB_URI: mongodb://mongodb:27017/repolens
+      RABBITMQ_URL: amqp://rabbitmq:5672
+      WORKSPACES_ROOT: /workspaces
+      ZIP_SIZE_LIMIT_MB: '200'
+      ZIP_FILE_COUNT_LIMIT: '50000'
+      DOWNLOAD_TIMEOUT_MS: '300000'
+      EXTRACT_TIMEOUT_MS: '300000'
+      LOG_LEVEL: info
+    volumes:
+      - workspaces-data:/workspaces
+    depends_on:
+      - mongodb
+      - rabbitmq
+
+  vibe-review-service:
+    build:
+      context: ../..
+      dockerfile: apps/vibe-review-service/Dockerfile
+    environment:
+      MONGODB_URI: mongodb://mongodb:27017/repolens
+      RABBITMQ_URL: amqp://rabbitmq:5672
+      WORKSPACES_ROOT: /workspaces
+      REVIEW_TIMEOUT_MS: '600000'
+      LOG_LEVEL: info
+    volumes:
+      - workspaces-data:/workspaces
+    depends_on:
+      - mongodb
+      - rabbitmq
+
+  web-client:
+    build:
+      context: ../..
+      dockerfile: apps/web-client/Dockerfile
+    environment:
+      VITE_API_BASE_URL: http://localhost:3001
+    ports:
+      - '5173:5173'
+    depends_on:
+      - intake-service
+
+volumes:
+  mongo-data:
+  workspaces-data:
