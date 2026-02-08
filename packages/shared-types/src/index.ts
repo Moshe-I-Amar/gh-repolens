@@ -1,10 +1,13 @@
-export type JobStatus =
-  | 'QUEUED'
-  | 'FETCHING'
-  | 'FETCHED'
-  | 'REVIEWING'
-  | 'COMPLETED'
-  | 'FAILED';
+export const jobStatusValues = [
+  'QUEUED',
+  'FETCHING',
+  'FETCHED',
+  'REVIEWING',
+  'COMPLETED',
+  'FAILED',
+] as const;
+
+export type JobStatus = (typeof jobStatusValues)[number];
 
 export type ReviewQuestionCategory = 'ARCH' | 'SECURITY' | 'PERFORMANCE';
 

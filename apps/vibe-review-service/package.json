@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@repolens/shared-types": "workspace:*",
-    "@repolens/shared-utils": "workspace:*"
+    "@repolens/shared-utils": "workspace:*",
+    "mongoose": "^8.3.2"
   }
 }
