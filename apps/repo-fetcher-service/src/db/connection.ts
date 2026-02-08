@@ -22,9 +22,10 @@ export const connectToMongo = async (
   mongoose.set('strictQuery', true);
 
   try {
-    await mongoose.connect(mongoUri, {
+    const connectOptions = {
       serverSelectionTimeoutMS: 5000,
-    });
+    } satisfies mongoose.ConnectOptions;
+    await mongoose.connect(mongoUri, connectOptions);
     logger.info({ mongoUri: maskMongoUri(mongoUri) }, 'MongoDB connected');
     return mongoose.connection;
   } catch (error) {

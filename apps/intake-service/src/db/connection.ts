@@ -11,6 +11,7 @@ const defaultLogger = createLogger({ level: process.env.LOG_LEVEL ?? 'info' });
 
 const maskMongoUri = (mongoUri: string) => mongoUri.replace(/\/\/.*@/, '//***@');
 
+// Connect once and reuse the shared mongoose connection.
 export const connectToMongo = async (
   mongoUri: string,
   logger: LoggerLike = defaultLogger,
@@ -22,9 +23,10 @@ export const connectToMongo = async (
   mongoose.set('strictQuery', true);
 
   try {
-    await mongoose.connect(mongoUri, {
+    const connectOptions = {
       serverSelectionTimeoutMS: 5000,
-    });
+    } satisfies mongoose.ConnectOptions;
+    await mongoose.connect(mongoUri, connectOptions);
     logger.info({ mongoUri: maskMongoUri(mongoUri) }, 'MongoDB connected');
     return mongoose.connection;
   } catch (error) {

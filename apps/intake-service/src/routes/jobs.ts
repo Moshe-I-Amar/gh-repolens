@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import type { Request, Response } from 'express';
 
 import { isValidGithubRepoUrl } from '@repolens/shared-utils';
 
@@ -8,7 +9,7 @@ import { JobModel } from '../models/Job';
 
 export const jobsRouter = Router();
 
-jobsRouter.post('/', async (req, res) => {
+jobsRouter.post('/', async (req: Request, res: Response) => {
   const repoUrl = req.body?.repoUrl;
 
   if (!repoUrl || typeof repoUrl !== 'string' || !isValidGithubRepoUrl(repoUrl)) {
@@ -38,7 +39,7 @@ jobsRouter.post('/', async (req, res) => {
   res.status(201).json({ jobId: job.id, status: job.status });
 });
 
-jobsRouter.get('/', async (req, res) => {
+jobsRouter.get('/', async (req: Request, res: Response) => {
   const status = req.query.status?.toString();
   const filter = status ? { status } : {};
 
@@ -46,7 +47,7 @@ jobsRouter.get('/', async (req, res) => {
   res.json(jobs);
 });
 
-jobsRouter.get('/:id', async (req, res) => {
+jobsRouter.get('/:id', async (req: Request, res: Response) => {
   const job = await JobModel.findById(req.params.id).lean();
   if (!job) {
     res.status(404).json({ error: 'NOT_FOUND' });
