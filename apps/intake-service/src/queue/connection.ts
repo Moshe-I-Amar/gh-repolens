@@ -1,8 +1,11 @@
 import { Channel, Connection, connect } from 'amqplib';
 import { createLogger } from '@repolens/shared-utils';
 
+type ConnectionModel = Awaited<ReturnType<typeof connect>>;
+
 let connection: Connection | undefined;
 let channel: Channel | undefined;
+let connectionModel: ConnectionModel | undefined;
 
 type LoggerLike = {
   info: (obj: unknown, msg?: string) => void;
@@ -22,13 +25,15 @@ export const getRabbitChannel = async (
   logger.info({ rabbitUrl }, 'Connecting to RabbitMQ...');
   const activeConnection = await connect(rabbitUrl);
   const activeChannel = await activeConnection.createChannel();
-  connection = activeConnection;
+  connectionModel = activeConnection;
+  connection = activeConnection.connection;
   channel = activeChannel;
 
   activeConnection.on('close', () => {
     logger.warn('RabbitMQ connection closed');
     connection = undefined;
     channel = undefined;
+    connectionModel = undefined;
   });
 
   activeConnection.on('error', (err) => {
@@ -48,11 +53,12 @@ export const closeRabbit = async (): Promise<void> => {
     }
   }
 
-  if (connection) {
+  if (connectionModel) {
     try {
-      await connection.close();
+      await connectionModel.close();
     } catch {
     } finally {
+      connectionModel = undefined;
       connection = undefined;
     }
   }
