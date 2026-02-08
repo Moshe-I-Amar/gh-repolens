@@ -1,5 +1,5 @@
 declare module 'unzipper' {
-  import { Readable } from 'stream';
+  import type { Readable } from 'stream';
 
   export type Entry = {
     type: 'File' | 'Directory' | string;

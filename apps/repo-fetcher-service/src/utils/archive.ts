@@ -1,7 +1,7 @@
 import { createWriteStream, promises as fs } from 'fs';
 import path from 'path';
 import { pipeline } from 'stream/promises';
-import unzipper from 'unzipper';
+import unzipper, { type Entry } from 'unzipper';
 import { fetch } from 'undici';
 
 import { createLogger } from '@repolens/shared-utils';
@@ -158,7 +158,7 @@ export const safeExtractZip = async (
   const archive = await unzipper.Open.file(zipPath);
 
   let fileCount = 0;
-  const extraction = archive.files.reduce<Promise<void>>(async (prev, entry) => {
+  const extraction = archive.files.reduce<Promise<void>>(async (prev: Promise<void>, entry: Entry) => {
     await prev;
 
     if (entry.type === 'Directory') {
