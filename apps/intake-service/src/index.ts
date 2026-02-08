@@ -5,7 +5,7 @@ import rateLimit from 'express-rate-limit';
 import { createLogger } from '@repolens/shared-utils';
 
 import { connectToMongo } from './db/connection';
-import { connectWithRetry, createChannel } from './queue/connection';
+import { getRabbitChannel } from './queue/connection';
 import { correlationIdMiddleware } from './middleware/correlationId';
 import { errorHandler } from './middleware/errorHandler';
 import { healthHandler } from './routes/health';
@@ -23,8 +23,7 @@ const start = async () => {
   }
 
   await connectToMongo(mongoUri, logger);
-  const connection = await connectWithRetry(rabbitUrl, logger);
-  const channel = await createChannel(connection);
+  const channel = await getRabbitChannel(rabbitUrl, logger);
 
   const app = express();
   app.locals.channel = channel;
