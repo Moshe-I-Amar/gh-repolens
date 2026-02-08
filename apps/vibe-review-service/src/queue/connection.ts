@@ -1,6 +1,7 @@
-import amqp, { Channel, Connection } from 'amqplib';
-
+import { Channel, connect } from 'amqplib';
 import { createLogger } from '@repolens/shared-utils';
+
+type ConnectionModel = Awaited<ReturnType<typeof connect>>;
 
 type LoggerLike = {
   info: (obj: unknown, msg?: string) => void;
@@ -15,14 +16,14 @@ export const connectWithRetry = async (
   url: string,
   logger: LoggerLike = defaultLogger,
   maxAttempts = 10,
-): Promise<Connection> => {
+): Promise<ConnectionModel> => {
   let attempt = 0;
   let lastError: unknown;
 
   while (attempt < maxAttempts) {
     attempt += 1;
     try {
-      const connection = await amqp.connect(url);
+      const connection = await connect(url);
       logger.info({ attempt }, 'RabbitMQ connected');
       return connection;
     } catch (error) {
@@ -36,6 +37,6 @@ export const connectWithRetry = async (
   throw lastError;
 };
 
-export const createChannel = async (connection: Connection): Promise<Channel> => {
+export const createChannel = async (connection: ConnectionModel): Promise<Channel> => {
   return connection.createChannel();
 };
