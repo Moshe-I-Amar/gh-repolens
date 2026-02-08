@@ -1,4 +1,5 @@
 import { createLogger } from '@repolens/shared-utils';
+import type { ReviewResults } from '@repolens/shared-types';
 
 import { JobModel } from '../models/Job';
 import { createVibeManifest } from '../utils/vibeManifest';
@@ -42,7 +43,7 @@ export const processJobFetchedMessage = async (payload: { jobId?: string; localP
     await job.save();
   } catch (error) {
     const partialAnswers =
-      (error as Error & { partialResults?: typeof job.reviewResults?.questions }).partialResults ??
+      (error as Error & { partialResults?: ReviewResults['questions'] }).partialResults ??
       job.reviewResults?.questions ??
       [];
     const partial = await formatAndStoreResults(jobId, partialAnswers);
