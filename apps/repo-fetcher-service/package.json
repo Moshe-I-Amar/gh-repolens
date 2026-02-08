@@ -1,0 +1,15 @@
+{
+  "name": "@repolens/repo-fetcher-service",
+  "version": "0.0.1",
+  "scripts": {
+    "dev": "node dist/index.js",
+    "build": "tsc -p tsconfig.json",
+    "lint": "eslint .",
+    "format": "prettier -w .",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@repolens/shared-types": "workspace:*",
+    "@repolens/shared-utils": "workspace:*"
+  }
+}

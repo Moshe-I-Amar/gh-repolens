@@ -1,0 +1,11 @@
+{
+  "name": "@repolens/web-client",
+  "version": "0.0.1",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "lint": "eslint .",
+    "format": "prettier -w .",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  }
+}
