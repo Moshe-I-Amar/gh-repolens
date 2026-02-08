@@ -46,8 +46,12 @@ export const resolveDefaultBranch = async (
   }
 
   const owner = match[1];
-  const repo = match[2].replace(/\.git$/, '');
-  const apiUrl = `https://api.github.com/repos/${owner}/${repo}`;
+  const repo = match[2];
+  if (!owner || !repo) {
+    throw new Error('INVALID_REPO_URL');
+  }
+  const cleanRepo = repo.replace(/\.git$/, '');
+  const apiUrl = `https://api.github.com/repos/${owner}/${cleanRepo}`;
 
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     try {
@@ -108,8 +112,12 @@ export const downloadRepoArchive = async (
   }
 
   const owner = match[1];
-  const repo = match[2].replace(/\.git$/, '');
-  const zipUrl = `https://github.com/${owner}/${repo}/archive/refs/heads/${branch}.zip`;
+  const repo = match[2];
+  if (!owner || !repo) {
+    throw new Error('INVALID_REPO_URL');
+  }
+  const cleanRepo = repo.replace(/\.git$/, '');
+  const zipUrl = `https://github.com/${owner}/${cleanRepo}/archive/refs/heads/${branch}.zip`;
 
   const response = await downloadWithRetry(zipUrl, 3, timeoutMs);
   if (!response.ok || !response.body) {
@@ -122,7 +130,7 @@ export const downloadRepoArchive = async (
   for await (const chunk of response.body) {
     totalBytes += chunk.length;
     if (totalBytes > sizeLimitBytes) {
-      response.body.destroy(new Error('ZIP_SIZE_LIMIT_EXCEEDED'));
+      await response.body.cancel(new Error('ZIP_SIZE_LIMIT_EXCEEDED'));
       throw new Error('ZIP_SIZE_LIMIT_EXCEEDED');
     }
     fileStream.write(chunk);
@@ -150,7 +158,7 @@ export const safeExtractZip = async (
   const archive = await unzipper.Open.file(zipPath);
 
   let fileCount = 0;
-  const extraction = archive.files.reduce(async (prev, entry) => {
+  const extraction = archive.files.reduce<Promise<void>>(async (prev, entry) => {
     await prev;
 
     if (entry.type === 'Directory') {
