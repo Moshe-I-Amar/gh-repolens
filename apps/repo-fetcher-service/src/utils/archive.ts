@@ -1,6 +1,6 @@
 import { createWriteStream, promises as fs } from 'fs';
 import path from 'path';
-import { PassThrough } from 'stream';
+import { PassThrough, Readable } from 'stream';
 import { pipeline } from 'stream/promises';
 import unzipper, { type Entry } from 'unzipper';
 import { fetch } from 'undici';
@@ -130,8 +130,11 @@ export const downloadRepoArchive = async (
   const zipUrl = `https://github.com/${owner}/${cleanRepo}/archive/refs/heads/${branch}.zip`;
 
   const response = await downloadWithRetry(zipUrl, 3, timeoutMs);
-  if (!response.ok || !response.body) {
+  if (!response.ok) {
     throw new Error(`ZIP_DOWNLOAD_FAILED_${response.status}`);
+  }
+  if (!response.body) {
+    throw new Error('DOWNLOAD_FAILED: response.body is null');
   }
 
   const fileStream = createWriteStream(targetPath);
@@ -141,18 +144,20 @@ export const downloadRepoArchive = async (
     limiter.destroy(error);
   };
 
-  response.body.on('error', onStreamError);
+  const nodeBody = Readable.fromWeb(response.body as unknown as globalThis.ReadableStream);
+
+  nodeBody.on('error', onStreamError);
   fileStream.on('error', onStreamError);
   limiter.on('data', (chunk: Buffer) => {
     totalBytes += chunk.length;
     if (totalBytes > sizeLimitBytes) {
       const error = new Error('ZIP_SIZE_LIMIT_EXCEEDED');
-      response.body.destroy(error);
+      nodeBody.destroy(error);
       limiter.destroy(error);
     }
   });
 
-  await pipeline(response.body, limiter, fileStream);
+  await pipeline(nodeBody, limiter, fileStream);
 };
 
 const isWithin = (targetPath: string, root: string) => {
