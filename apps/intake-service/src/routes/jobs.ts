@@ -3,13 +3,16 @@ import type { Request, Response } from 'express';
 
 import { isValidGithubRepoUrl } from '@repolens/shared-utils';
 
+import { asyncHandler } from '../middleware/asyncHandler';
 import { ROUTING_KEYS } from '../queue/constants';
 import { publishMessage } from '../queue/publisher';
 import { JobModel } from '../models/Job';
 
 export const jobsRouter = Router();
 
-jobsRouter.post('/', async (req: Request, res: Response) => {
+jobsRouter.post(
+  '/',
+  asyncHandler(async (req: Request, res: Response) => {
   const repoUrl = req.body?.repoUrl;
 
   if (!repoUrl || typeof repoUrl !== 'string' || !isValidGithubRepoUrl(repoUrl)) {
@@ -36,18 +39,24 @@ jobsRouter.post('/', async (req: Request, res: Response) => {
     return;
   }
 
-  res.status(201).json({ jobId: job.id, status: job.status });
-});
+    res.status(201).json({ jobId: job.id, status: job.status });
+  }),
+);
 
-jobsRouter.get('/', async (req: Request, res: Response) => {
+jobsRouter.get(
+  '/',
+  asyncHandler(async (req: Request, res: Response) => {
   const status = req.query.status?.toString();
   const filter = status ? { status } : {};
 
   const jobs = await JobModel.find(filter).sort({ updatedAt: -1 }).lean();
   res.json(jobs);
-});
+  }),
+);
 
-jobsRouter.get('/:id', async (req: Request, res: Response) => {
+jobsRouter.get(
+  '/:id',
+  asyncHandler(async (req: Request, res: Response) => {
   const job = await JobModel.findById(req.params.id).lean();
   if (!job) {
     res.status(404).json({ error: 'NOT_FOUND' });
@@ -55,4 +64,5 @@ jobsRouter.get('/:id', async (req: Request, res: Response) => {
   }
 
   res.json(job);
-});
+  }),
+);

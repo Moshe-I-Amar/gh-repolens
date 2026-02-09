@@ -1,5 +1,6 @@
 import { createWriteStream, promises as fs } from 'fs';
 import path from 'path';
+import { PassThrough } from 'stream';
 import { pipeline } from 'stream/promises';
 import unzipper, { type Entry } from 'unzipper';
 import { fetch } from 'undici';
@@ -19,12 +20,21 @@ const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number, label: str
   ]);
 };
 
+const githubHeaders = () => {
+  const headers: Record<string, string> = { 'User-Agent': 'RepoLens' };
+  const token = process.env.GITHUB_TOKEN?.trim();
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  return headers;
+};
+
 const fetchJson = async (url: string, timeoutMs: number) => {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(url, {
-      headers: { 'User-Agent': 'RepoLens' },
+      headers: githubHeaders(),
       signal: controller.signal,
     });
     if (!response.ok) {
@@ -80,7 +90,7 @@ const downloadWithRetry = async (url: string, attempts: number, timeoutMs: numbe
       try {
         return await withTimeout(
           fetch(url, {
-            headers: { 'User-Agent': 'RepoLens' },
+            headers: githubHeaders(),
             signal: controller.signal,
           }),
           timeoutMs,
@@ -126,20 +136,23 @@ export const downloadRepoArchive = async (
 
   const fileStream = createWriteStream(targetPath);
   let totalBytes = 0;
+  const limiter = new PassThrough();
+  const onStreamError = (error: Error) => {
+    limiter.destroy(error);
+  };
 
-  for await (const chunk of response.body) {
+  response.body.on('error', onStreamError);
+  fileStream.on('error', onStreamError);
+  limiter.on('data', (chunk: Buffer) => {
     totalBytes += chunk.length;
     if (totalBytes > sizeLimitBytes) {
-      await response.body.cancel(new Error('ZIP_SIZE_LIMIT_EXCEEDED'));
-      throw new Error('ZIP_SIZE_LIMIT_EXCEEDED');
+      const error = new Error('ZIP_SIZE_LIMIT_EXCEEDED');
+      response.body.destroy(error);
+      limiter.destroy(error);
     }
-    fileStream.write(chunk);
-  }
-
-  await new Promise<void>((resolve, reject) => {
-    fileStream.end(() => resolve());
-    fileStream.on('error', reject);
   });
+
+  await pipeline(response.body, limiter, fileStream);
 };
 
 const isWithin = (targetPath: string, root: string) => {

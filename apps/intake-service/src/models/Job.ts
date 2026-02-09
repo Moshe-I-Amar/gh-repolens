@@ -13,6 +13,7 @@ export type JobDocument = Document & {
   updatedAt: Date;
 };
 
+// TODO: Schema duplication across services risks drift; consider centralizing when refactoring.
 const jobSchema = new Schema<JobDocument>(
   {
     repoUrl: {
