@@ -49,11 +49,24 @@ export const processJobCreatedMessage = async (
   const fileCountLimit = parseLimit(process.env.ZIP_FILE_COUNT_LIMIT, 50000);
   const downloadTimeout = parseLimit(process.env.DOWNLOAD_TIMEOUT_MS, 300000);
   const extractTimeout = parseLimit(process.env.EXTRACT_TIMEOUT_MS, 300000);
+  const totalExtractedLimit =
+    parseLimit(process.env.TOTAL_EXTRACTED_SIZE_LIMIT_MB, 500) * 1024 * 1024;
 
   try {
     await fs.mkdir(workspacePath, { recursive: true });
     await downloadRepoArchive(job.repoUrl, archivePath, sizeLimit, downloadTimeout);
-    await safeExtractZip(archivePath, repoPath, fileCountLimit, extractTimeout);
+    await safeExtractZip(
+      archivePath,
+      repoPath,
+      fileCountLimit,
+      extractTimeout,
+      totalExtractedLimit,
+    );
+    try {
+      await fs.rm(archivePath, { force: true });
+    } catch (error) {
+      logger.warn({ error, archivePath }, 'Failed to remove archive after extraction');
+    }
 
     job.status = 'FETCHED';
     job.localPath = repoPath;

@@ -24,16 +24,19 @@ const start = async () => {
   }
 
   await connectToMongo(mongoUri, logger);
-  const channel = await getRabbitChannel(rabbitUrl, logger);
+  const getChannel = () => getRabbitChannel(rabbitUrl, logger);
 
   const app = express();
-  app.locals.channel = channel;
+  app.locals.getChannel = getChannel;
 
   app.use(helmet());
   app.use((req, res, next) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader(
+      'Access-Control-Allow-Headers',
+      'Content-Type, Authorization, x-correlation-id',
+    );
     if (req.method === 'OPTIONS') {
       return res.sendStatus(204);
     }

@@ -116,6 +116,7 @@ const summarizeQuestion = (questionId: string) => {
 
 // Stores results while preserving partial progress.
 export const formatAndStoreResults = async (jobId: string, results: ReviewAnswer[]) => {
+  // TODO: persist results using jobId once a storage layer is introduced.
   const existing: ReviewResults = {
     questions: results,
   };

@@ -171,11 +171,13 @@ export const safeExtractZip = async (
   destination: string,
   fileCountLimit: number,
   timeoutMs: number,
+  totalSizeLimitBytes: number,
 ): Promise<void> => {
   await fs.mkdir(destination, { recursive: true });
   const archive = await unzipper.Open.file(zipPath);
 
   let fileCount = 0;
+  let totalExtractedBytes = 0;
   const extraction = archive.files.reduce<Promise<void>>(async (prev: Promise<void>, entry: Entry) => {
     await prev;
 
@@ -201,7 +203,19 @@ export const safeExtractZip = async (
     }
 
     await fs.mkdir(path.dirname(targetPath), { recursive: true });
-    await pipeline(entry.stream(), createWriteStream(targetPath));
+
+    const fileStream = entry.stream();
+    const counter = new PassThrough();
+    counter.on('data', (chunk: Buffer) => {
+      totalExtractedBytes += chunk.length;
+      if (totalExtractedBytes > totalSizeLimitBytes) {
+        const error = new Error('TOTAL_EXTRACTED_SIZE_LIMIT_EXCEEDED');
+        counter.destroy(error);
+        fileStream.destroy(error);
+      }
+    });
+
+    await pipeline(fileStream, counter, createWriteStream(targetPath));
   }, Promise.resolve());
 
   await withTimeout(extraction, timeoutMs, 'EXTRACT');

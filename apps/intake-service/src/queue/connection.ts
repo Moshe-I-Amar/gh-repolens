@@ -1,11 +1,11 @@
-import { Channel, Connection, connect } from 'amqplib';
+import { Channel, connect } from 'amqplib';
 import { createLogger } from '@repolens/shared-utils';
 
 type ConnectionModel = Awaited<ReturnType<typeof connect>>;
 
-let connection: Connection | undefined;
 let channel: Channel | undefined;
 let connectionModel: ConnectionModel | undefined;
+let reconnecting: Promise<Channel> | null = null;
 
 type LoggerLike = {
   info: (obj: unknown, msg?: string) => void;
@@ -14,52 +14,67 @@ type LoggerLike = {
 };
 
 const defaultLogger = createLogger({ level: process.env.LOG_LEVEL ?? 'info' });
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const connectOnce = async (rabbitUrl: string, logger: LoggerLike): Promise<Channel> => {
+  logger.info({ rabbitUrl }, 'Connecting to RabbitMQ...');
+  const activeConnection = await connect(rabbitUrl);
+  const activeChannel = await activeConnection.createChannel();
+  connectionModel = activeConnection;
+  channel = activeChannel;
+
+  const triggerReconnect = (reason: string, error?: unknown) => {
+    logger.warn({ reason, error }, 'RabbitMQ disconnected, scheduling reconnect');
+    channel = undefined;
+    connectionModel = undefined;
+    void reconnectWithBackoff(rabbitUrl, logger);
+  };
+
+  activeConnection.on('close', () => triggerReconnect('connection.close'));
+  activeConnection.on('error', (err) => triggerReconnect('connection.error', err));
+  activeChannel.on('close', () => triggerReconnect('channel.close'));
+  activeChannel.on('error', (err) => triggerReconnect('channel.error', err));
+
+  return activeChannel;
+};
+
+const reconnectWithBackoff = async (rabbitUrl: string, logger: LoggerLike) => {
+  if (reconnecting) {
+    return reconnecting;
+  }
+
+  reconnecting = (async () => {
+    let attempt = 0;
+    while (!channel) {
+      attempt += 1;
+      const delay = Math.min(1000 * 2 ** attempt, 10000);
+      try {
+        await sleep(delay);
+        await connectOnce(rabbitUrl, logger);
+        logger.info({ attempt }, 'RabbitMQ reconnected');
+      } catch (error) {
+        logger.error({ attempt, error }, 'RabbitMQ reconnect attempt failed');
+      }
+    }
+    reconnecting = null;
+    return channel;
+  })();
+
+  return reconnecting;
+};
 
 /** Creates and caches a RabbitMQ channel using the Promise-based API. */
 export const getRabbitChannel = async (
   rabbitUrl: string,
   logger: LoggerLike = defaultLogger,
 ): Promise<Channel> => {
-  if (channel) return channel;
-
-  logger.info({ rabbitUrl }, 'Connecting to RabbitMQ...');
-  const activeConnection = await connect(rabbitUrl);
-  const activeChannel = await activeConnection.createChannel();
-  connectionModel = activeConnection;
-  connection = activeConnection.connection;
-  channel = activeChannel;
-
-  activeConnection.on('close', () => {
-    logger.warn('RabbitMQ connection closed');
-    connection = undefined;
-    channel = undefined;
-    connectionModel = undefined;
-  });
-
-  activeConnection.on('error', (err) => {
-    logger.error({ err }, 'RabbitMQ connection error');
-  });
-
-  return activeChannel;
-};
-
-export const closeRabbit = async (): Promise<void> => {
   if (channel) {
-    try {
-      await channel.close();
-    } catch {
-    } finally {
-      channel = undefined;
-    }
+    return channel;
   }
 
-  if (connectionModel) {
-    try {
-      await connectionModel.close();
-    } catch {
-    } finally {
-      connectionModel = undefined;
-      connection = undefined;
-    }
+  if (reconnecting) {
+    return reconnecting;
   }
+
+  return connectOnce(rabbitUrl, logger);
 };
