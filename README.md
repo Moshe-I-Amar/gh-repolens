@@ -10,13 +10,23 @@ GitHub Repo Scan Platform: Intake -> Fetcher -> Vibe Review -> UI.
 pnpm install
 ```
 
-2) Start the stack:
+2) Create local env files from the examples (edit values as needed):
+
+```bash
+copy .env.example .env
+copy apps\intake-service\.env.example apps\intake-service\.env
+copy apps\repo-fetcher-service\.env.example apps\repo-fetcher-service\.env
+copy apps\vibe-review-service\.env.example apps\vibe-review-service\.env
+copy apps\web-client\.env.example apps\web-client\.env
+```
+
+3) Start the stack:
 
 ```bash
 pnpm dev:compose
 ```
 
-3) Open the UI at `http://localhost:5173` (default Vite port).
+4) Open the UI at `http://localhost:5173` (default Vite port).
 
 ## K8s Local (kind/minikube)
 

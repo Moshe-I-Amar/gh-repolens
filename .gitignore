@@ -1,0 +1,44 @@
+# Node/PNPM
+node_modules/
+.pnpm-store/
+.pnp.*
+
+# Build outputs
+dist/
+build/
+.next/
+out/
+coverage/
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Env/secrets
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.crt
+secrets/
+
+# OS/IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Docker local
+.docker/
+docker-data/
+
+# Workspace volumes
+workspaces/
+
+# Caches/temp
+.cache/
+tmp/
+.temp/
+
