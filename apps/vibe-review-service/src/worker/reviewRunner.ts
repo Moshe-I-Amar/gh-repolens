@@ -131,11 +131,10 @@ export const runReviewForJob = async (repoRoot: string): Promise<ReviewAnswer[]>
     for (const question of reviewQuestions) {
       try {
         const context = await getContextForQuestion(repoRoot, question.id);
-        const answer = `Summary: Automated review placeholder for ${summarizeQuestion(question.id)}.
-Findings: Context files collected (${context.files.length}).
-Risk/Severity: LOW.
-File references: ${context.files.map((file) => file.path).join(', ') || 'N/A'}.
-Suggested fix: Replace placeholder with Codex review.`;
+        const answer = `Summary: Context snapshot for ${summarizeQuestion(question.id)}.
+Findings: Collected ${context.files.length} files for review context.
+Risk/Severity: LOW (context captured; no automated analysis performed).
+File references: ${context.files.map((file) => file.path).join(', ') || 'N/A'}.`;
 
         answers.push({
           id: question.id,
