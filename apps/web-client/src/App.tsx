@@ -145,7 +145,6 @@ export default function App() {
           <input
             value={repoUrl}
             onChange={(event) => setRepoUrl(event.target.value)}
-            placeholder="https://github.com/org/repo"
           />
           <button type="submit" disabled={submitting || repoUrl.length === 0}>
             {submitting ? 'Submitting...' : 'Queue Review'}
