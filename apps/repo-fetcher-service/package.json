@@ -12,6 +12,7 @@
     "@repolens/shared-types": "workspace:*",
     "@repolens/shared-utils": "workspace:*",
     "amqplib": "^0.10.3",
+    "dotenv": "^16.4.5",
     "mongoose": "^8.3.2",
     "unzipper": "^0.10.14",
     "undici": "^6.18.1"

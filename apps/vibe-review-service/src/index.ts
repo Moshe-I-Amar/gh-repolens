@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { createLogger } from '@repolens/shared-utils';
 
 import { connectToMongo } from './db/connection';
