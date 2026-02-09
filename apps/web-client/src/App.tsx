@@ -21,6 +21,7 @@ type Job = {
   repoUrl: string;
   status: JobStatus;
   updatedAt: string;
+  localPath?: string | null;
   reviewResults?: { questions: ReviewAnswer[] } | null;
 };
 
@@ -211,6 +212,10 @@ export default function App() {
                 <div>
                   <h2>Review Details</h2>
                   <p className="empty">{selectedJob.repoUrl}</p>
+                  <p className="empty">
+                    Download folder:{' '}
+                    {selectedJob.localPath ? selectedJob.localPath : 'Pending workspace assignment'}
+                  </p>
                 </div>
                 <button type="button" onClick={() => setSelectedJob(null)}>
                   Close
