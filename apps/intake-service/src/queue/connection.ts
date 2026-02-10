@@ -15,9 +15,11 @@ type LoggerLike = {
 
 const defaultLogger = createLogger({ level: process.env.LOG_LEVEL ?? 'info' });
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const maskRabbitUrl = (rabbitUrl: string) =>
+  rabbitUrl.replace(/(amqps?:\/\/)([^@]+)@/i, '$1***@');
 
 const connectOnce = async (rabbitUrl: string, logger: LoggerLike): Promise<Channel> => {
-  logger.info({ rabbitUrl }, 'Connecting to RabbitMQ...');
+  logger.info({ rabbitUrl: maskRabbitUrl(rabbitUrl) }, 'Connecting to RabbitMQ...');
   const activeConnection = await connect(rabbitUrl);
   const activeChannel = await activeConnection.createChannel();
   connectionModel = activeConnection;
