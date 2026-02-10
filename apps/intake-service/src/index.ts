@@ -17,6 +17,8 @@ const logger = createLogger({
   service: 'intake-service',
 });
 
+const REQUIRED_MONGO_URI = 'mongodb://localhost:27017/repoLens';
+
 const start = async () => {
   const mongoUri = process.env.MONGODB_URI ?? '';
   const rabbitUrl = process.env.RABBITMQ_URL ?? '';
@@ -24,6 +26,9 @@ const start = async () => {
 
   if (!mongoUri || !rabbitUrl) {
     throw new Error('Missing required environment variables');
+  }
+  if (mongoUri !== REQUIRED_MONGO_URI) {
+    throw new Error('MONGODB_URI_MUST_BE_LOCALHOST_REPOLENS');
   }
 
   await connectToMongo(mongoUri, logger);

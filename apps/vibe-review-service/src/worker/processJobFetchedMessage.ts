@@ -14,6 +14,90 @@ const logger = createLogger({
   service: 'vibe-review-service',
 });
 
+const MAX_READABLE_SAMPLE_FILES = 10;
+const MAX_SCAN_FILES = 5000;
+const ignoredDirectories = new Set([
+  '.git',
+  'node_modules',
+  'dist',
+  'build',
+  'coverage',
+  '.next',
+  '.nuxt',
+  '.idea',
+  '.vscode',
+]);
+const readableExtensions = new Set([
+  '.ts',
+  '.tsx',
+  '.js',
+  '.jsx',
+  '.mjs',
+  '.cjs',
+  '.json',
+  '.yml',
+  '.yaml',
+  '.md',
+  '.java',
+  '.go',
+  '.py',
+  '.rb',
+  '.php',
+  '.cs',
+  '.rs',
+  '.kt',
+  '.swift',
+  '.sql',
+  '.html',
+  '.css',
+  '.scss',
+]);
+
+const collectReadableFiles = async (
+  rootPath: string,
+): Promise<{ count: number; samplePaths: string[] }> => {
+  const samplePaths: string[] = [];
+  let count = 0;
+  let scanned = 0;
+
+  const walk = async (dir: string) => {
+    const entries = await fs.readdir(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (scanned >= MAX_SCAN_FILES) {
+        return;
+      }
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (ignoredDirectories.has(entry.name)) {
+          continue;
+        }
+        await walk(fullPath);
+        continue;
+      }
+      if (!entry.isFile()) {
+        continue;
+      }
+      scanned += 1;
+      const extension = path.extname(entry.name).toLowerCase();
+      if (!readableExtensions.has(extension) && entry.name !== 'README') {
+        continue;
+      }
+      try {
+        await fs.access(fullPath, fs.constants.R_OK);
+        count += 1;
+        if (samplePaths.length < MAX_READABLE_SAMPLE_FILES) {
+          samplePaths.push(path.relative(rootPath, fullPath));
+        }
+      } catch {
+        // Ignore files that cannot be read.
+      }
+    }
+  };
+
+  await walk(rootPath);
+  return { count, samplePaths };
+};
+
 // Main job review handler that supports partial results on failure.
 export const processJobFetchedMessage = async (payload: { jobId?: string; localPath?: string }) => {
   const parsedPayload = jobFetchedPayloadSchema.safeParse(payload);
@@ -32,19 +116,18 @@ export const processJobFetchedMessage = async (payload: { jobId?: string; localP
     return;
   }
 
-  const localPath = payloadLocalPath ?? job.localPath ?? '';
-  const resolvedLocalPath = localPath ? path.resolve(localPath) : '';
+  const resolvedLocalPath = path.resolve(payloadLocalPath);
 
-  if (!resolvedLocalPath) {
+  if (!job.localPath || path.resolve(job.localPath) !== resolvedLocalPath) {
     job.status = 'FAILED';
-    job.error = 'INVALID_LOCAL_PATH';
+    job.error = 'LOCAL_PATH_MISMATCH';
     await job.save();
     logJobEvent(logger, {
       jobId,
       stage: 'FAILED',
       level: 'error',
-      message: 'Missing local path for review',
-      fields: { error: job.error },
+      message: 'job.fetched localPath does not match persisted job.localPath',
+      fields: { payloadLocalPath: resolvedLocalPath, persistedLocalPath: job.localPath, error: job.error },
     });
     return;
   }
@@ -68,6 +151,21 @@ export const processJobFetchedMessage = async (payload: { jobId?: string; localP
     return;
   }
 
+  const readableFiles = await collectReadableFiles(resolvedLocalPath);
+  if (readableFiles.count === 0) {
+    job.status = 'FAILED';
+    job.error = 'NO_READABLE_FILES';
+    await job.save();
+    logJobEvent(logger, {
+      jobId,
+      stage: 'FAILED',
+      level: 'error',
+      message: 'Repository contains no readable files for analysis',
+      fields: { localPath: resolvedLocalPath, error: job.error },
+    });
+    return;
+  }
+
   job.status = 'REVIEWING';
   await job.save();
   const reviewStartedAt = Date.now();
@@ -75,6 +173,11 @@ export const processJobFetchedMessage = async (payload: { jobId?: string; localP
     jobId,
     stage: 'REVIEWING',
     message: 'Review started',
+    fields: {
+      localPath: resolvedLocalPath,
+      readableFileCount: readableFiles.count,
+      samplePaths: readableFiles.samplePaths,
+    },
   });
 
   try {
@@ -85,12 +188,22 @@ export const processJobFetchedMessage = async (payload: { jobId?: string; localP
       createdAt: new Date().toISOString(),
     });
 
-    const answers = await runReviewForJob(resolvedLocalPath);
+    const answers = await runReviewForJob(jobId, resolvedLocalPath);
     const reviewResults = await formatAndStoreResults(jobId, answers);
 
     job.status = 'COMPLETED';
     job.reviewResults = reviewResults;
     await job.save();
+    logger.info(
+      {
+        jobId,
+        stage: 'COMPLETED',
+        mongoCollection: 'jobs',
+        reviewQuestionCount: reviewResults.questions.length,
+        riskLevel: reviewResults.riskSummary?.level,
+      },
+      'MongoDB write confirmed for review results',
+    );
     const finishedAt = Date.now();
     logJobEvent(logger, {
       jobId,
@@ -109,8 +222,18 @@ export const processJobFetchedMessage = async (payload: { jobId?: string; localP
     const partial = await formatAndStoreResults(jobId, partialAnswers);
     job.reviewResults = partial;
     job.status = 'FAILED';
-    job.error = 'REVIEW_FAILED';
+    job.error = error instanceof Error ? error.message : 'REVIEW_FAILED';
     await job.save();
+    logger.error(
+      {
+        jobId,
+        stage: 'FAILED',
+        mongoCollection: 'jobs',
+        reviewQuestionCount: partial.questions.length,
+        error: job.error,
+      },
+      'MongoDB write confirmed for failed review',
+    );
     const failedAt = Date.now();
     logJobEvent(logger, {
       jobId,

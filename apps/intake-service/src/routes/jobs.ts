@@ -16,18 +16,58 @@ const logger = createLogger({
   service: 'intake-service',
 });
 
+const forbiddenRepoUrlFragments = ['example', 'sample', 'test', 'your-org', 'your-repo'];
+
+const sanitizePayloadForLog = (value: unknown) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return { type: typeof value };
+  }
+  const record = value as Record<string, unknown>;
+  const repoUrlValue = typeof record.repoUrl === 'string' ? record.repoUrl.trim() : undefined;
+  return {
+    keys: Object.keys(record),
+    repoUrl: repoUrlValue ? repoUrlValue.slice(0, 256) : undefined,
+  };
+};
+
+const isForbiddenRepoUrl = (repoUrl: string) => {
+  const normalized = repoUrl.toLowerCase();
+  return forbiddenRepoUrlFragments.some((fragment) => normalized.includes(fragment));
+};
+
 jobsRouter.post(
   '/',
   asyncHandler(async (req: Request, res: Response) => {
-    const repoUrl = req.body?.repoUrl;
+    logger.info(
+      { stage: 'INTAKE_RECEIVED', payload: sanitizePayloadForLog(req.body) },
+      'Received raw client payload',
+    );
+
+    if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
+      res.status(400).json({ error: 'INVALID_PAYLOAD' });
+      return;
+    }
+    const payload = req.body as Record<string, unknown>;
+    const payloadKeys = Object.keys(payload);
+    if (payloadKeys.length !== 1 || payloadKeys[0] !== 'repoUrl') {
+      res.status(400).json({ error: 'UNSUPPORTED_PAYLOAD_FIELDS' });
+      return;
+    }
+
+    const repoUrl = payload.repoUrl;
 
     if (!repoUrl || typeof repoUrl !== 'string' || !isValidGithubRepoUrl(repoUrl)) {
       res.status(400).json({ error: 'INVALID_REPO_URL' });
       return;
     }
+    const trimmedRepoUrl = repoUrl.trim();
+    if (isForbiddenRepoUrl(trimmedRepoUrl)) {
+      res.status(400).json({ error: 'DEFAULT_OR_TEST_REPO_URL_REJECTED' });
+      return;
+    }
 
     const job = await JobModel.create({
-      repoUrl: repoUrl.trim(),
+      repoUrl: trimmedRepoUrl,
       status: 'QUEUED',
     });
     const correlationId = (req as CorrelationRequest).correlationId;

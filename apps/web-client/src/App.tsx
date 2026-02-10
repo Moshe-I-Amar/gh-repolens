@@ -26,6 +26,8 @@ type Job = {
 };
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3001';
+const forbiddenRepoFragments = ['example', 'sample', 'test', 'your-org', 'your-repo'];
+const githubRepoRegex = /^https?:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)(\.git)?\/?$/;
 
 const statusLabel = (status: JobStatus) =>
   status.toLowerCase().replace(/(^|\s|_)([a-z])/g, (_m, p1, p2) => `${p1}${p2.toUpperCase()}`);
@@ -34,6 +36,17 @@ const isInProgress = (status: JobStatus) =>
   ['QUEUED', 'FETCHING', 'FETCHED', 'REVIEWING'].includes(status);
 
 const formatDate = (value: string) => new Date(value).toLocaleString();
+
+const validateRepoUrl = (value: string) => {
+  const trimmed = value.trim();
+  if (!githubRepoRegex.test(trimmed)) {
+    return 'Use a valid GitHub repository URL.';
+  }
+  if (forbiddenRepoFragments.some((fragment) => trimmed.toLowerCase().includes(fragment))) {
+    return 'Example or test repository URLs are rejected.';
+  }
+  return null;
+};
 
 const usePollingJobs = () => {
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -130,16 +143,23 @@ export default function App() {
     event.preventDefault();
     setSubmitting(true);
     setFormError(null);
+    const validationError = validateRepoUrl(repoUrl);
+    if (validationError) {
+      setSubmitting(false);
+      setFormError(validationError);
+      return;
+    }
 
     try {
       const response = await fetch(`${API_BASE_URL}/jobs`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ repoUrl }),
+        body: JSON.stringify({ repoUrl: repoUrl.trim() }),
       });
 
       if (!response.ok) {
-        throw new Error('Failed to submit repo');
+        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(payload?.error ?? 'Failed to submit repo');
       }
 
       setRepoUrl('');

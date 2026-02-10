@@ -51,6 +51,6 @@ export const reviewResultsSchema = z.object({
 
 export const jobFetchedPayloadSchema = z.object({
   jobId: z.string().min(1),
-  localPath: z.string().optional(),
+  localPath: z.string().min(1),
 });
 

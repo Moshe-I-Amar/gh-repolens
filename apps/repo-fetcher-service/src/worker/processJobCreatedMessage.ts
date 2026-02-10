@@ -1,5 +1,7 @@
 import path from 'path';
 import { promises as fs } from 'fs';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 
 import { createLogger, logJobEvent } from '@repolens/shared-utils';
 
@@ -8,16 +10,109 @@ import { Channel } from 'amqplib';
 import { JobModel } from '../models/Job';
 import { ROUTING_KEYS } from '../queue/constants';
 import { publishMessage } from '../queue/publisher';
-import { cleanupWorkspace, downloadRepoArchive, safeExtractZip } from '../utils/archive';
 
 const logger = createLogger({
   level: process.env.LOG_LEVEL ?? 'info',
   service: 'repo-fetcher-service',
 });
 
-const parseLimit = (value: string | undefined, fallback: number) => {
-  const parsed = value ? Number(value) : fallback;
-  return Number.isFinite(parsed) ? parsed : fallback;
+const execFileAsync = promisify(execFile);
+const MAX_READABLE_SAMPLE_FILES = 10;
+const MAX_WALK_FILES = 5000;
+const READABLE_TEXT_EXTENSIONS = new Set([
+  '.ts',
+  '.tsx',
+  '.js',
+  '.jsx',
+  '.mjs',
+  '.cjs',
+  '.json',
+  '.yml',
+  '.yaml',
+  '.md',
+  '.java',
+  '.go',
+  '.py',
+  '.rb',
+  '.php',
+  '.cs',
+  '.rs',
+  '.kt',
+  '.swift',
+  '.sql',
+  '.html',
+  '.css',
+  '.scss',
+]);
+
+const ignoredDirectories = new Set([
+  '.git',
+  'node_modules',
+  'dist',
+  'build',
+  'coverage',
+  '.next',
+  '.nuxt',
+  '.idea',
+  '.vscode',
+]);
+
+const countReadableFiles = async (
+  rootPath: string,
+): Promise<{ count: number; samplePaths: string[] }> => {
+  const samplePaths: string[] = [];
+  let count = 0;
+  let visited = 0;
+
+  const walk = async (dir: string) => {
+    const entries = await fs.readdir(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (visited >= MAX_WALK_FILES) {
+        return;
+      }
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (ignoredDirectories.has(entry.name)) {
+          continue;
+        }
+        await walk(fullPath);
+        continue;
+      }
+      if (!entry.isFile()) {
+        continue;
+      }
+      visited += 1;
+      const extension = path.extname(entry.name).toLowerCase();
+      if (!READABLE_TEXT_EXTENSIONS.has(extension) && entry.name !== 'README') {
+        continue;
+      }
+      try {
+        await fs.access(fullPath, fs.constants.R_OK);
+        count += 1;
+        if (samplePaths.length < MAX_READABLE_SAMPLE_FILES) {
+          samplePaths.push(path.relative(rootPath, fullPath));
+        }
+      } catch {
+        // Non-readable files are ignored by design.
+      }
+    }
+  };
+
+  await walk(rootPath);
+  return { count, samplePaths };
+};
+
+const cloneRepository = async (repoUrl: string, targetPath: string) => {
+  try {
+    await execFileAsync('git', ['clone', '--depth', '1', repoUrl, targetPath], {
+      windowsHide: true,
+      timeout: Number(process.env.CLONE_TIMEOUT_MS ?? 300000),
+      maxBuffer: 10 * 1024 * 1024,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'GIT_CLONE_FAILED';
+    throw new Error(`GIT_CLONE_FAILED:${message}`);
+  }
 };
 
 // Main consumer handler for job.created messages.
@@ -52,29 +147,26 @@ export const processJobCreatedMessage = async (
   const workspaceRoot = process.env.WORKSPACES_ROOT ?? '/workspaces';
   const workspacePath = path.join(workspaceRoot, jobId);
   const repoPath = path.join(workspacePath, 'repo');
-  const archivePath = path.join(workspacePath, 'archive.zip');
-
-  const sizeLimit = parseLimit(process.env.ZIP_SIZE_LIMIT_MB, 200) * 1024 * 1024;
-  const fileCountLimit = parseLimit(process.env.ZIP_FILE_COUNT_LIMIT, 50000);
-  const downloadTimeout = parseLimit(process.env.DOWNLOAD_TIMEOUT_MS, 300000);
-  const extractTimeout = parseLimit(process.env.EXTRACT_TIMEOUT_MS, 300000);
-  const totalExtractedLimit =
-    parseLimit(process.env.TOTAL_EXTRACTED_SIZE_LIMIT_MB, 500) * 1024 * 1024;
 
   try {
+    await fs.rm(workspacePath, { recursive: true, force: true });
     await fs.mkdir(workspacePath, { recursive: true });
-    await downloadRepoArchive(job.repoUrl, archivePath, sizeLimit, downloadTimeout);
-    await safeExtractZip(
-      archivePath,
-      repoPath,
-      fileCountLimit,
-      extractTimeout,
-      totalExtractedLimit,
-    );
-    try {
-      await fs.rm(archivePath, { force: true });
-    } catch (error) {
-      logger.warn({ error, archivePath }, 'Failed to remove archive after extraction');
+    await cloneRepository(job.repoUrl, repoPath);
+    logJobEvent(logger, {
+      jobId,
+      stage: 'FETCHING',
+      message: 'Repository cloned from client repoUrl',
+      fields: { localPath: repoPath, repoUrl: job.repoUrl },
+    });
+
+    const stats = await fs.stat(repoPath);
+    if (!stats.isDirectory()) {
+      throw new Error('CLONE_PATH_NOT_DIRECTORY');
+    }
+
+    const readableFiles = await countReadableFiles(repoPath);
+    if (readableFiles.count === 0) {
+      throw new Error('NO_READABLE_FILES');
     }
 
     job.status = 'FETCHED';
@@ -83,14 +175,23 @@ export const processJobCreatedMessage = async (
     logJobEvent(logger, {
       jobId,
       stage: 'FETCHED',
-      message: 'Repo fetched and extracted',
-      fields: { localPath: repoPath },
+      message: 'Repo fetched and cloned',
+      fields: {
+        localPath: repoPath,
+        readableFileCount: readableFiles.count,
+        samplePaths: readableFiles.samplePaths,
+      },
     });
 
     await publishMessage(
       channel,
       ROUTING_KEYS.jobFetched,
-      { jobId: job.id, localPath: repoPath },
+      {
+        jobId: job.id,
+        localPath: repoPath,
+        readableFileCount: readableFiles.count,
+        samplePaths: readableFiles.samplePaths,
+      },
       logger,
     );
   } catch (error) {
@@ -105,7 +206,11 @@ export const processJobCreatedMessage = async (
       fields: { error: job.error },
     });
 
-    await cleanupWorkspace(workspacePath);
+    try {
+      await fs.rm(workspacePath, { recursive: true, force: true });
+    } catch (cleanupError) {
+      logger.error({ cleanupError, workspacePath }, 'Failed to cleanup workspace');
+    }
     throw error;
   }
 };
