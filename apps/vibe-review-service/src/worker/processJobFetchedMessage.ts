@@ -5,6 +5,7 @@ import { createLogger, logJobEvent } from '@repolens/shared-utils';
 import type { ReviewResults } from '@repolens/shared-types';
 
 import { JobModel } from '../models/Job';
+import { jobFetchedPayloadSchema } from '../review/schemas';
 import { createVibeManifest } from '../utils/vibeManifest';
 import { formatAndStoreResults, runReviewForJob } from './reviewRunner';
 
@@ -15,10 +16,11 @@ const logger = createLogger({
 
 // Main job review handler that supports partial results on failure.
 export const processJobFetchedMessage = async (payload: { jobId?: string; localPath?: string }) => {
-  const jobId = payload.jobId;
-  if (!jobId) {
-    throw new Error('JOB_ID_MISSING');
+  const parsedPayload = jobFetchedPayloadSchema.safeParse(payload);
+  if (!parsedPayload.success) {
+    throw new Error('INVALID_JOB_FETCHED_PAYLOAD');
   }
+  const { jobId, localPath: payloadLocalPath } = parsedPayload.data;
 
   const job = await JobModel.findById(jobId);
   if (!job) {
@@ -30,7 +32,7 @@ export const processJobFetchedMessage = async (payload: { jobId?: string; localP
     return;
   }
 
-  const localPath = payload.localPath ?? job.localPath ?? '';
+  const localPath = payloadLocalPath ?? job.localPath ?? '';
   const resolvedLocalPath = localPath ? path.resolve(localPath) : '';
 
   if (!resolvedLocalPath) {

@@ -5,6 +5,8 @@ import { createLogger } from '@repolens/shared-utils';
 import { ReviewAnswer, ReviewResults } from '@repolens/shared-types';
 
 import { reviewQuestions } from '../review/questions';
+import { reviewAnswerSchema, reviewResultsSchema } from '../review/schemas';
+import { calculateRiskSummary } from './riskScoring';
 
 const logger = createLogger({
   level: process.env.LOG_LEVEL ?? 'info',
@@ -120,11 +122,13 @@ const summarizeQuestion = (questionId: string) => {
 // Stores results while preserving partial progress.
 export const formatAndStoreResults = async (jobId: string, results: ReviewAnswer[]) => {
   // TODO: persist results using jobId once a storage layer is introduced.
+  const normalizedAnswers = results.map((result) => reviewAnswerSchema.parse(result));
   const existing: ReviewResults = {
-    questions: results,
+    questions: normalizedAnswers,
+    riskSummary: calculateRiskSummary(normalizedAnswers),
   };
 
-  return existing;
+  return reviewResultsSchema.parse(existing);
 };
 
 // Runs the 10-question review; swap adapter later for Codex/Vibe automation.
@@ -137,14 +141,14 @@ export const runReviewForJob = async (repoRoot: string): Promise<ReviewAnswer[]>
         const context = await getContextForQuestion(repoRoot, question.id);
         const answer = `Summary: Context snapshot for ${summarizeQuestion(question.id)}.
 Findings: Collected ${context.files.length} files for review context.
-Risk/Severity: LOW (context captured; no automated analysis performed).
+Risk/Severity: INFO (context captured; no automated analysis performed).
 File references: ${context.files.map((file) => file.path).join(', ') || 'N/A'}.`;
 
         answers.push({
           id: question.id,
           title: question.title,
           category: question.category,
-          severity: 'LOW',
+          severity: 'INFO',
           answer,
           refs: context.files.map((file) => ({ path: file.path })),
         });

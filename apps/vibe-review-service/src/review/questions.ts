@@ -1,4 +1,6 @@
-export const reviewQuestions = [
+import { reviewQuestionsSchema } from './schemas';
+
+const reviewQuestionsConfig = [
   {
     id: 'security-sql-injection',
     title: 'Check for SQL injection in the code.',
@@ -41,3 +43,5 @@ export const reviewQuestions = [
       'Summarize the key issues identified across the project scan and provide clear, actionable remediation guidance.',
   },
 ] as const;
+
+export const reviewQuestions = reviewQuestionsSchema.parse(reviewQuestionsConfig);
