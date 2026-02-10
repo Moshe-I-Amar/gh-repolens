@@ -25,6 +25,7 @@ const connectOnce = async (rabbitUrl: string, logger: LoggerLike): Promise<Chann
   logger.info({ rabbitUrl: maskRabbitUrl(rabbitUrl) }, 'Connecting to RabbitMQ...');
   const activeConnection = await connect(rabbitUrl);
   const activeChannel = await activeConnection.createChannel();
+  logger.info({ rabbitUrl: maskRabbitUrl(rabbitUrl) }, 'RabbitMQ connected');
   connectionModel = activeConnection;
   channel = activeChannel;
 

@@ -1,6 +1,6 @@
 import { Channel, ConsumeMessage } from 'amqplib';
 
-import { createLogger } from '@repolens/shared-utils';
+import { createLogger, logJobEvent } from '@repolens/shared-utils';
 
 import {
   JOBS_DLX,
@@ -96,10 +96,14 @@ export const startJobCreatedConsumer = async (
     try {
       const payload = JSON.parse(message.content.toString());
       const jobId = (payload as { jobId?: string } | null)?.jobId;
-      logger.info(
-        { jobId, stage: 'QUEUED', routingKey: ROUTING_KEYS.jobCreated },
-        'Received job.created message',
-      );
+      if (jobId) {
+        logJobEvent(logger, {
+          jobId,
+          stage: 'QUEUED',
+          message: 'Received job.created message',
+          fields: { routingKey: ROUTING_KEYS.jobCreated },
+        });
+      }
       await onMessage(payload);
       channel.ack(message);
     } catch (error) {

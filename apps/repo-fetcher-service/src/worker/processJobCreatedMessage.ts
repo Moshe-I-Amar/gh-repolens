@@ -1,7 +1,7 @@
 import path from 'path';
 import { promises as fs } from 'fs';
 
-import { createLogger } from '@repolens/shared-utils';
+import { createLogger, logJobEvent } from '@repolens/shared-utils';
 
 import { Channel } from 'amqplib';
 
@@ -42,7 +42,12 @@ export const processJobCreatedMessage = async (
 
   job.status = 'FETCHING';
   await job.save();
-  logger.info({ jobId, stage: 'FETCHING', repoUrl: job.repoUrl }, 'Job status updated');
+  logJobEvent(logger, {
+    jobId,
+    stage: 'FETCHING',
+    message: 'Job status updated',
+    fields: { repoUrl: job.repoUrl },
+  });
 
   const workspaceRoot = process.env.WORKSPACES_ROOT ?? '/workspaces';
   const workspacePath = path.join(workspaceRoot, jobId);
@@ -75,7 +80,12 @@ export const processJobCreatedMessage = async (
     job.status = 'FETCHED';
     job.localPath = repoPath;
     await job.save();
-    logger.info({ jobId, stage: 'FETCHED', localPath: repoPath }, 'Repo fetched and extracted');
+    logJobEvent(logger, {
+      jobId,
+      stage: 'FETCHED',
+      message: 'Repo fetched and extracted',
+      fields: { localPath: repoPath },
+    });
 
     await publishMessage(
       channel,
@@ -87,10 +97,13 @@ export const processJobCreatedMessage = async (
     job.status = 'FAILED';
     job.error = error instanceof Error ? error.message : 'FETCH_FAILED';
     await job.save();
-    logger.error(
-      { jobId, stage: 'FAILED', error: job.error },
-      'Repo fetch failed',
-    );
+    logJobEvent(logger, {
+      jobId,
+      stage: 'FAILED',
+      level: 'error',
+      message: 'Repo fetch failed',
+      fields: { error: job.error },
+    });
 
     await cleanupWorkspace(workspacePath);
     throw error;

@@ -1,7 +1,7 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 
-import { createLogger } from '@repolens/shared-utils';
+import { createLogger, logJobEvent } from '@repolens/shared-utils';
 import type { ReviewResults } from '@repolens/shared-types';
 
 import { JobModel } from '../models/Job';
@@ -37,7 +37,13 @@ export const processJobFetchedMessage = async (payload: { jobId?: string; localP
     job.status = 'FAILED';
     job.error = 'INVALID_LOCAL_PATH';
     await job.save();
-    logger.error({ jobId }, 'Missing local path for review');
+    logJobEvent(logger, {
+      jobId,
+      stage: 'FAILED',
+      level: 'error',
+      message: 'Missing local path for review',
+      fields: { error: job.error },
+    });
     return;
   }
 
@@ -50,13 +56,24 @@ export const processJobFetchedMessage = async (payload: { jobId?: string; localP
     job.status = 'FAILED';
     job.error = 'INVALID_LOCAL_PATH';
     await job.save();
-    logger.error({ jobId, localPath: resolvedLocalPath, error }, 'Invalid local path for review');
+    logJobEvent(logger, {
+      jobId,
+      stage: 'FAILED',
+      level: 'error',
+      message: 'Invalid local path for review',
+      fields: { localPath: resolvedLocalPath, error, errorCode: job.error },
+    });
     return;
   }
 
   job.status = 'REVIEWING';
   await job.save();
-  logger.info({ jobId, stage: 'REVIEWING' }, 'Review started');
+  const reviewStartedAt = Date.now();
+  logJobEvent(logger, {
+    jobId,
+    stage: 'REVIEWING',
+    message: 'Review started',
+  });
 
   try {
     await createVibeManifest(resolvedLocalPath, {
@@ -72,7 +89,16 @@ export const processJobFetchedMessage = async (payload: { jobId?: string; localP
     job.status = 'COMPLETED';
     job.reviewResults = reviewResults;
     await job.save();
-    logger.info({ jobId, stage: 'COMPLETED' }, 'Review completed');
+    const finishedAt = Date.now();
+    logJobEvent(logger, {
+      jobId,
+      stage: 'COMPLETED',
+      message: 'Review completed',
+      fields: {
+        reviewDurationMs: finishedAt - reviewStartedAt,
+        totalDurationMs: finishedAt - new Date(job.createdAt).getTime(),
+      },
+    });
   } catch (error) {
     const partialAnswers =
       (error as Error & { partialResults?: ReviewResults['questions'] }).partialResults ??
@@ -83,7 +109,18 @@ export const processJobFetchedMessage = async (payload: { jobId?: string; localP
     job.status = 'FAILED';
     job.error = 'REVIEW_FAILED';
     await job.save();
-    logger.error({ jobId, stage: 'FAILED', error: job.error }, 'Review failed');
+    const failedAt = Date.now();
+    logJobEvent(logger, {
+      jobId,
+      stage: 'FAILED',
+      level: 'error',
+      message: 'Review failed',
+      fields: {
+        error: job.error,
+        reviewDurationMs: failedAt - reviewStartedAt,
+        totalDurationMs: failedAt - new Date(job.createdAt).getTime(),
+      },
+    });
     throw error;
   }
 };

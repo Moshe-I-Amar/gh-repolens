@@ -1,9 +1,8 @@
 import { Router } from 'express';
 import type { Request, Response } from 'express';
 
-import { isValidGithubRepoUrl } from '@repolens/shared-utils';
+import { createLogger, isValidGithubRepoUrl, logJobEvent } from '@repolens/shared-utils';
 import { jobStatusValues } from '@repolens/shared-types';
-import { createLogger } from '@repolens/shared-utils';
 
 import { asyncHandler } from '../middleware/asyncHandler';
 import type { CorrelationRequest } from '../middleware/correlationId';
@@ -32,10 +31,12 @@ jobsRouter.post(
       status: 'QUEUED',
     });
     const correlationId = (req as CorrelationRequest).correlationId;
-    logger.info(
-      { jobId: job.id, stage: 'QUEUED', repoUrl: job.repoUrl, correlationId },
-      'Job created',
-    );
+    logJobEvent(logger, {
+      jobId: job.id,
+      stage: 'QUEUED',
+      message: 'Job created',
+      fields: { repoUrl: job.repoUrl, correlationId },
+    });
 
     try {
       const channel = await req.app.locals.getChannel();
@@ -43,19 +44,24 @@ jobsRouter.post(
         jobId: job.id,
         repoUrl: job.repoUrl,
       });
-      logger.info(
-        { jobId: job.id, stage: 'QUEUED', routingKey: ROUTING_KEYS.jobCreated },
-        'Published job.created',
-      );
+      logJobEvent(logger, {
+        jobId: job.id,
+        stage: 'QUEUED',
+        message: 'Published job.created',
+        fields: { routingKey: ROUTING_KEYS.jobCreated },
+      });
     } catch (_error) {
       await JobModel.findByIdAndUpdate(job.id, {
         status: 'FAILED',
         error: 'PUBLISH_FAILED',
       });
-      logger.error(
-        { jobId: job.id, stage: 'FAILED', routingKey: ROUTING_KEYS.jobCreated },
-        'Failed to publish job.created',
-      );
+      logJobEvent(logger, {
+        jobId: job.id,
+        stage: 'FAILED',
+        level: 'error',
+        message: 'Failed to publish job.created',
+        fields: { routingKey: ROUTING_KEYS.jobCreated },
+      });
       res.status(502).json({ jobId: job.id, status: 'FAILED' });
       return;
     }
