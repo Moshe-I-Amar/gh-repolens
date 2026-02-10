@@ -13,7 +13,10 @@ type LoggerLike = {
   error: (obj: unknown, msg?: string) => void;
 };
 
-const defaultLogger = createLogger({ level: process.env.LOG_LEVEL ?? 'info' });
+const defaultLogger = createLogger({
+  level: process.env.LOG_LEVEL ?? 'info',
+  service: 'intake-service',
+});
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const maskRabbitUrl = (rabbitUrl: string) =>
   rabbitUrl.replace(/(amqps?:\/\/)([^@]+)@/i, '$1***@');

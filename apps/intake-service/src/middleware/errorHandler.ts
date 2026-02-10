@@ -4,7 +4,10 @@ import { createLogger } from '@repolens/shared-utils';
 
 import type { CorrelationRequest } from './correlationId';
 
-const logger = createLogger({ level: process.env.LOG_LEVEL ?? 'info' });
+const logger = createLogger({
+  level: process.env.LOG_LEVEL ?? 'info',
+  service: 'intake-service',
+});
 
 export const errorHandler = (
   err: Error,

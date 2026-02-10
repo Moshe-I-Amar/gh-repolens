@@ -7,7 +7,10 @@ import { startRabbitChannel } from './queue/connection';
 import { startJobFetchedConsumer } from './queue/consumer';
 import { processJobFetchedMessage } from './worker/processJobFetchedMessage';
 
-const logger = createLogger({ level: process.env.LOG_LEVEL ?? 'info' });
+const logger = createLogger({
+  level: process.env.LOG_LEVEL ?? 'info',
+  service: 'vibe-review-service',
+});
 
 const start = async () => {
   const mongoUri = process.env.MONGODB_URI ?? '';

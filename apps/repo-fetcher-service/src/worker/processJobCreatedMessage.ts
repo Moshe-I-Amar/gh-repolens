@@ -10,7 +10,10 @@ import { ROUTING_KEYS } from '../queue/constants';
 import { publishMessage } from '../queue/publisher';
 import { cleanupWorkspace, downloadRepoArchive, safeExtractZip } from '../utils/archive';
 
-const logger = createLogger({ level: process.env.LOG_LEVEL ?? 'info' });
+const logger = createLogger({
+  level: process.env.LOG_LEVEL ?? 'info',
+  service: 'repo-fetcher-service',
+});
 
 const parseLimit = (value: string | undefined, fallback: number) => {
   const parsed = value ? Number(value) : fallback;
@@ -39,6 +42,7 @@ export const processJobCreatedMessage = async (
 
   job.status = 'FETCHING';
   await job.save();
+  logger.info({ jobId, stage: 'FETCHING', repoUrl: job.repoUrl }, 'Job status updated');
 
   const workspaceRoot = process.env.WORKSPACES_ROOT ?? '/workspaces';
   const workspacePath = path.join(workspaceRoot, jobId);
@@ -71,6 +75,7 @@ export const processJobCreatedMessage = async (
     job.status = 'FETCHED';
     job.localPath = repoPath;
     await job.save();
+    logger.info({ jobId, stage: 'FETCHED', localPath: repoPath }, 'Repo fetched and extracted');
 
     await publishMessage(
       channel,
@@ -82,6 +87,10 @@ export const processJobCreatedMessage = async (
     job.status = 'FAILED';
     job.error = error instanceof Error ? error.message : 'FETCH_FAILED';
     await job.save();
+    logger.error(
+      { jobId, stage: 'FAILED', error: job.error },
+      'Repo fetch failed',
+    );
 
     await cleanupWorkspace(workspacePath);
     throw error;

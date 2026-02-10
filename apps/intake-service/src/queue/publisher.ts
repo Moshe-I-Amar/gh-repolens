@@ -4,7 +4,22 @@ import { createLogger } from '@repolens/shared-utils';
 
 import { JOBS_DLX, JOBS_EXCHANGE, JOBS_EXCHANGE_TYPE } from './constants';
 
-const defaultLogger = createLogger({ level: process.env.LOG_LEVEL ?? 'info' });
+const defaultLogger = createLogger({
+  level: process.env.LOG_LEVEL ?? 'info',
+  service: 'intake-service',
+});
+
+const getPayloadSummary = (payload: unknown) => {
+  if (!payload || typeof payload !== 'object') {
+    return undefined;
+  }
+  const record = payload as Record<string, unknown>;
+  return {
+    jobId: record.jobId,
+    repoUrl: record.repoUrl,
+    localPath: record.localPath,
+  };
+};
 
 export const setupExchange = async (channel: Channel) => {
   await channel.assertExchange(JOBS_EXCHANGE, JOBS_EXCHANGE_TYPE, { durable: true });
@@ -26,5 +41,7 @@ export const publishMessage = async (
 
   if (!published) {
     logger.error({ routingKey }, 'RabbitMQ publish returned false');
+    return;
   }
+  logger.info({ routingKey, payload: getPayloadSummary(payload) }, 'RabbitMQ message published');
 };

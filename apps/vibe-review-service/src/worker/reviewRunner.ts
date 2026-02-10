@@ -6,7 +6,10 @@ import { ReviewAnswer, ReviewResults } from '@repolens/shared-types';
 
 import { reviewQuestions } from '../review/questions';
 
-const logger = createLogger({ level: process.env.LOG_LEVEL ?? 'info' });
+const logger = createLogger({
+  level: process.env.LOG_LEVEL ?? 'info',
+  service: 'vibe-review-service',
+});
 
 const MAX_FILE_BYTES = 200 * 1024;
 const MAX_FILES = 20;

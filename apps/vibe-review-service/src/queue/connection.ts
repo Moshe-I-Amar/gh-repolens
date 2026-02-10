@@ -9,7 +9,10 @@ type LoggerLike = {
   error: (obj: unknown, msg?: string) => void;
 };
 
-const defaultLogger = createLogger({ level: process.env.LOG_LEVEL ?? 'info' });
+const defaultLogger = createLogger({
+  level: process.env.LOG_LEVEL ?? 'info',
+  service: 'vibe-review-service',
+});
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 

@@ -3,13 +3,19 @@ import type { Request, Response } from 'express';
 
 import { isValidGithubRepoUrl } from '@repolens/shared-utils';
 import { jobStatusValues } from '@repolens/shared-types';
+import { createLogger } from '@repolens/shared-utils';
 
 import { asyncHandler } from '../middleware/asyncHandler';
+import type { CorrelationRequest } from '../middleware/correlationId';
 import { ROUTING_KEYS } from '../queue/constants';
 import { publishMessage } from '../queue/publisher';
 import { JobModel } from '../models/Job';
 
 export const jobsRouter = Router();
+const logger = createLogger({
+  level: process.env.LOG_LEVEL ?? 'info',
+  service: 'intake-service',
+});
 
 jobsRouter.post(
   '/',
@@ -25,6 +31,11 @@ jobsRouter.post(
       repoUrl: repoUrl.trim(),
       status: 'QUEUED',
     });
+    const correlationId = (req as CorrelationRequest).correlationId;
+    logger.info(
+      { jobId: job.id, stage: 'QUEUED', repoUrl: job.repoUrl, correlationId },
+      'Job created',
+    );
 
     try {
       const channel = await req.app.locals.getChannel();
@@ -32,11 +43,19 @@ jobsRouter.post(
         jobId: job.id,
         repoUrl: job.repoUrl,
       });
+      logger.info(
+        { jobId: job.id, stage: 'QUEUED', routingKey: ROUTING_KEYS.jobCreated },
+        'Published job.created',
+      );
     } catch (_error) {
       await JobModel.findByIdAndUpdate(job.id, {
         status: 'FAILED',
         error: 'PUBLISH_FAILED',
       });
+      logger.error(
+        { jobId: job.id, stage: 'FAILED', routingKey: ROUTING_KEYS.jobCreated },
+        'Failed to publish job.created',
+      );
       res.status(502).json({ jobId: job.id, status: 'FAILED' });
       return;
     }

@@ -3,7 +3,10 @@ import { Request, Response, NextFunction } from 'express';
 
 import { createLogger } from '@repolens/shared-utils';
 
-const logger = createLogger({ level: process.env.LOG_LEVEL ?? 'info' });
+const logger = createLogger({
+  level: process.env.LOG_LEVEL ?? 'info',
+  service: 'intake-service',
+});
 
 export type CorrelationRequest = Request & { correlationId?: string };
 

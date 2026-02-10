@@ -7,7 +7,10 @@ import { fetch } from 'undici';
 
 import { createLogger } from '@repolens/shared-utils';
 
-const logger = createLogger({ level: process.env.LOG_LEVEL ?? 'info' });
+const logger = createLogger({
+  level: process.env.LOG_LEVEL ?? 'info',
+  service: 'repo-fetcher-service',
+});
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 

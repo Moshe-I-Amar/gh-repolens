@@ -12,7 +12,10 @@ import { errorHandler } from './middleware/errorHandler';
 import { healthHandler } from './routes/health';
 import { jobsRouter } from './routes/jobs';
 
-const logger = createLogger({ level: process.env.LOG_LEVEL ?? 'info' });
+const logger = createLogger({
+  level: process.env.LOG_LEVEL ?? 'info',
+  service: 'intake-service',
+});
 
 const start = async () => {
   const mongoUri = process.env.MONGODB_URI ?? '';

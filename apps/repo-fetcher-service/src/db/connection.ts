@@ -7,7 +7,10 @@ type LoggerLike = {
   error: (obj: unknown, msg?: string) => void;
 };
 
-const defaultLogger = createLogger({ level: process.env.LOG_LEVEL ?? 'info' });
+const defaultLogger = createLogger({
+  level: process.env.LOG_LEVEL ?? 'info',
+  service: 'repo-fetcher-service',
+});
 
 const maskMongoUri = (mongoUri: string) => mongoUri.replace(/\/\/.*@/, '//***@');
 

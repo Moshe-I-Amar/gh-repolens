@@ -11,7 +11,10 @@ import {
   ROUTING_KEYS,
 } from './constants';
 
-const defaultLogger = createLogger({ level: process.env.LOG_LEVEL ?? 'info' });
+const defaultLogger = createLogger({
+  level: process.env.LOG_LEVEL ?? 'info',
+  service: 'vibe-review-service',
+});
 
 const getDeathCount = (message: ConsumeMessage, queueName: string): number => {
   const death = message.properties.headers?.['x-death'];
@@ -92,6 +95,11 @@ export const startJobFetchedConsumer = async (
 
     try {
       const payload = JSON.parse(message.content.toString());
+      const jobId = (payload as { jobId?: string } | null)?.jobId;
+      logger.info(
+        { jobId, stage: 'FETCHED', routingKey: ROUTING_KEYS.jobFetched },
+        'Received job.fetched message',
+      );
       await onMessage(payload);
       channel.ack(message);
     } catch (error) {

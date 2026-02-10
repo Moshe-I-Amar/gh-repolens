@@ -8,7 +8,10 @@ import { JobModel } from '../models/Job';
 import { createVibeManifest } from '../utils/vibeManifest';
 import { formatAndStoreResults, runReviewForJob } from './reviewRunner';
 
-const logger = createLogger({ level: process.env.LOG_LEVEL ?? 'info' });
+const logger = createLogger({
+  level: process.env.LOG_LEVEL ?? 'info',
+  service: 'vibe-review-service',
+});
 
 // Main job review handler that supports partial results on failure.
 export const processJobFetchedMessage = async (payload: { jobId?: string; localPath?: string }) => {
@@ -53,6 +56,7 @@ export const processJobFetchedMessage = async (payload: { jobId?: string; localP
 
   job.status = 'REVIEWING';
   await job.save();
+  logger.info({ jobId, stage: 'REVIEWING' }, 'Review started');
 
   try {
     await createVibeManifest(resolvedLocalPath, {
@@ -68,6 +72,7 @@ export const processJobFetchedMessage = async (payload: { jobId?: string; localP
     job.status = 'COMPLETED';
     job.reviewResults = reviewResults;
     await job.save();
+    logger.info({ jobId, stage: 'COMPLETED' }, 'Review completed');
   } catch (error) {
     const partialAnswers =
       (error as Error & { partialResults?: ReviewResults['questions'] }).partialResults ??
@@ -78,6 +83,7 @@ export const processJobFetchedMessage = async (payload: { jobId?: string; localP
     job.status = 'FAILED';
     job.error = 'REVIEW_FAILED';
     await job.save();
+    logger.error({ jobId, stage: 'FAILED', error: job.error }, 'Review failed');
     throw error;
   }
 };

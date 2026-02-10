@@ -7,7 +7,10 @@ import { startRabbitChannel } from './queue/connection';
 import { startJobCreatedConsumer } from './queue/consumer';
 import { processJobCreatedMessage } from './worker/processJobCreatedMessage';
 
-const logger = createLogger({ level: process.env.LOG_LEVEL ?? 'info' });
+const logger = createLogger({
+  level: process.env.LOG_LEVEL ?? 'info',
+  service: 'repo-fetcher-service',
+});
 
 const start = async () => {
   const mongoUri = process.env.MONGODB_URI ?? '';
