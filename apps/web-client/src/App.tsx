@@ -86,9 +86,34 @@ export default function App() {
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [formError, setFormError] = useState<string | null>(null);
+  const [inProgressPage, setInProgressPage] = useState(1);
+  const [completedPage, setCompletedPage] = useState(1);
+  const pageSize = 7;
 
   const inProgress = useMemo(() => jobs.filter((job) => isInProgress(job.status)), [jobs]);
   const completed = useMemo(() => jobs.filter((job) => job.status === 'COMPLETED'), [jobs]);
+  const inProgressPages = Math.max(1, Math.ceil(inProgress.length / pageSize));
+  const completedPages = Math.max(1, Math.ceil(completed.length / pageSize));
+  const inProgressSlice = useMemo(
+    () => inProgress.slice((inProgressPage - 1) * pageSize, inProgressPage * pageSize),
+    [inProgress, inProgressPage]
+  );
+  const completedSlice = useMemo(
+    () => completed.slice((completedPage - 1) * pageSize, completedPage * pageSize),
+    [completed, completedPage]
+  );
+
+  useEffect(() => {
+    if (inProgressPage > inProgressPages) {
+      setInProgressPage(inProgressPages);
+    }
+  }, [inProgressPage, inProgressPages]);
+
+  useEffect(() => {
+    if (completedPage > completedPages) {
+      setCompletedPage(completedPages);
+    }
+  }, [completedPage, completedPages]);
 
   useEffect(() => {
     if (!selectedJob) {
@@ -162,7 +187,7 @@ export default function App() {
             {inProgress.length === 0 && !loading ? (
               <p className="empty">No active scans yet.</p>
             ) : (
-              inProgress.map((job) => (
+              inProgressSlice.map((job) => (
                 <div
                   key={job._id}
                   className="job-card"
@@ -177,6 +202,27 @@ export default function App() {
               ))
             )}
           </div>
+          {inProgress.length > pageSize && (
+            <div className="pagination">
+              <button
+                type="button"
+                onClick={() => setInProgressPage((prev) => Math.max(1, prev - 1))}
+                disabled={inProgressPage === 1}
+              >
+                Prev
+              </button>
+              <span>
+                Page {inProgressPage} of {inProgressPages}
+              </span>
+              <button
+                type="button"
+                onClick={() => setInProgressPage((prev) => Math.min(inProgressPages, prev + 1))}
+                disabled={inProgressPage === inProgressPages}
+              >
+                Next
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="panel">
@@ -185,7 +231,7 @@ export default function App() {
             {completed.length === 0 ? (
               <p className="empty">No completed reviews yet.</p>
             ) : (
-              completed.map((job) => (
+              completedSlice.map((job) => (
                 <div
                   key={job._id}
                   className="job-card"
@@ -200,6 +246,27 @@ export default function App() {
               ))
             )}
           </div>
+          {completed.length > pageSize && (
+            <div className="pagination">
+              <button
+                type="button"
+                onClick={() => setCompletedPage((prev) => Math.max(1, prev - 1))}
+                disabled={completedPage === 1}
+              >
+                Prev
+              </button>
+              <span>
+                Page {completedPage} of {completedPages}
+              </span>
+              <button
+                type="button"
+                onClick={() => setCompletedPage((prev) => Math.min(completedPages, prev + 1))}
+                disabled={completedPage === completedPages}
+              >
+                Next
+              </button>
+            </div>
+          )}
         </div>
       </section>
 
