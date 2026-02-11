@@ -12,7 +12,12 @@ const logger = createLogger({
   service: 'repo-fetcher-service',
 });
 
-const REQUIRED_MONGO_URI = 'mongodb://localhost:27017/repoLens';
+const ALLOWED_MONGO_URIS = new Set([
+  'mongodb://localhost:27017/repoLens',
+  'mongodb://mongodb:27017/repoLens',
+]);
+const START_RETRY_DELAY_MS = Number(process.env.START_RETRY_DELAY_MS ?? 5000);
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const start = async () => {
   const mongoUri = process.env.MONGODB_URI ?? '';
@@ -21,8 +26,8 @@ const start = async () => {
   if (!mongoUri || !rabbitUrl) {
     throw new Error('Missing required environment variables');
   }
-  if (mongoUri !== REQUIRED_MONGO_URI) {
-    throw new Error('MONGODB_URI_MUST_BE_LOCALHOST_REPOLENS');
+  if (!ALLOWED_MONGO_URIS.has(mongoUri)) {
+    throw new Error('MONGODB_URI_MUST_TARGET_REPOLENS_DB');
   }
 
   await connectToMongo(mongoUri, logger);
@@ -56,7 +61,19 @@ const start = async () => {
   }, logger);
 };
 
-start().catch((error) => {
-  logger.error({ error }, 'Failed to start repo-fetcher service');
-  process.exit(1);
-});
+const startWithRetry = async () => {
+  for (;;) {
+    try {
+      await start();
+      return;
+    } catch (error) {
+      logger.error(
+        { error, retryDelayMs: START_RETRY_DELAY_MS },
+        'Failed to start repo-fetcher service, retrying',
+      );
+      await sleep(START_RETRY_DELAY_MS);
+    }
+  }
+};
+
+void startWithRetry();

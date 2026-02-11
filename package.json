@@ -10,7 +10,9 @@
     "lint": "pnpm -r lint",
     "format": "pnpm -r format",
     "typecheck": "pnpm -r typecheck",
-    "dev:compose": "docker compose -f infra/docker/docker-compose.yml up --build"
+    "dev:compose": "docker compose -f infra/docker/docker-compose.yml up --build",
+    "dev:compose:up": "docker compose -f infra/docker/docker-compose.yml up -d --build",
+    "dev:compose:down": "docker compose -f infra/docker/docker-compose.yml down"
   },
   "devDependencies": {
     "@types/amqplib": "^0.10.5",

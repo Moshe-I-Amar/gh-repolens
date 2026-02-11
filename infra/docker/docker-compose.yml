@@ -4,6 +4,11 @@ services:
     restart: unless-stopped
     ports:
       - '27017:27017'
+    healthcheck:
+      test: ['CMD', 'mongosh', '--quiet', '--eval', 'db.runCommand({ ping: 1 }).ok']
+      interval: 5s
+      timeout: 5s
+      retries: 20
     volumes:
       - mongo-data:/data/db
 
@@ -13,6 +18,11 @@ services:
     ports:
       - '5672:5672'
       - '15672:15672'
+    healthcheck:
+      test: ['CMD', 'rabbitmq-diagnostics', '-q', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
   intake-service:
     build:
@@ -20,21 +30,25 @@ services:
       dockerfile: apps/intake-service/Dockerfile
     environment:
       PORT: '3001'
-      MONGODB_URI: mongodb://localhost:27017/repoLens
+      MONGODB_URI: mongodb://mongodb:27017/repoLens
       RABBITMQ_URL: amqp://rabbitmq:5672
       LOG_LEVEL: info
+      START_RETRY_DELAY_MS: '5000'
+    restart: unless-stopped
     ports:
       - '3001:3001'
     depends_on:
-      - mongodb
-      - rabbitmq
+      mongodb:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
 
   repo-fetcher-service:
     build:
       context: ../..
       dockerfile: apps/repo-fetcher-service/Dockerfile
     environment:
-      MONGODB_URI: mongodb://localhost:27017/repoLens
+      MONGODB_URI: mongodb://mongodb:27017/repoLens
       RABBITMQ_URL: amqp://rabbitmq:5672
       WORKSPACES_ROOT: /workspaces
       ZIP_SIZE_LIMIT_MB: '200'
@@ -42,27 +56,35 @@ services:
       DOWNLOAD_TIMEOUT_MS: '300000'
       EXTRACT_TIMEOUT_MS: '300000'
       LOG_LEVEL: info
+      START_RETRY_DELAY_MS: '5000'
+    restart: unless-stopped
     volumes:
       - workspaces-data:/workspaces
     depends_on:
-      - mongodb
-      - rabbitmq
+      mongodb:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
 
   vibe-review-service:
     build:
       context: ../..
       dockerfile: apps/vibe-review-service/Dockerfile
     environment:
-      MONGODB_URI: mongodb://localhost:27017/repoLens
+      MONGODB_URI: mongodb://mongodb:27017/repoLens
       RABBITMQ_URL: amqp://rabbitmq:5672
       WORKSPACES_ROOT: /workspaces
       REVIEW_TIMEOUT_MS: '600000'
       LOG_LEVEL: info
+      START_RETRY_DELAY_MS: '5000'
+    restart: unless-stopped
     volumes:
       - workspaces-data:/workspaces
     depends_on:
-      - mongodb
-      - rabbitmq
+      mongodb:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
 
   web-client:
     build:
@@ -70,10 +92,12 @@ services:
       dockerfile: apps/web-client/Dockerfile
     environment:
       VITE_API_BASE_URL: http://localhost:3001
+    restart: unless-stopped
     ports:
       - '5174:5173'
     depends_on:
-      - intake-service
+      intake-service:
+        condition: service_started
 
 volumes:
   mongo-data:
