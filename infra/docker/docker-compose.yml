@@ -1,17 +1,4 @@
 services:
-  mongodb:
-    image: mongo:7
-    restart: unless-stopped
-    ports:
-      - '27017:27017'
-    healthcheck:
-      test: ['CMD', 'mongosh', '--quiet', '--eval', 'db.runCommand({ ping: 1 }).ok']
-      interval: 5s
-      timeout: 5s
-      retries: 20
-    volumes:
-      - mongo-data:/data/db
-
   rabbitmq:
     image: rabbitmq:3.13-management
     restart: unless-stopped
@@ -33,16 +20,16 @@ services:
       dockerfile: apps/intake-service/Dockerfile
     environment:
       PORT: '3001'
-      MONGODB_URI: mongodb://mongodb:27017/repoLens
+      MONGODB_URI: ${MONGODB_URI:-mongodb://host.docker.internal:27017/repoLens}
       RABBITMQ_URL: amqp://repolens:repolens2411@rabbitmq:5672
       LOG_LEVEL: info
       START_RETRY_DELAY_MS: '5000'
     restart: unless-stopped
     ports:
       - '3001:3001'
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
     depends_on:
-      mongodb:
-        condition: service_healthy
       rabbitmq:
         condition: service_healthy
 
@@ -51,7 +38,7 @@ services:
       context: ../..
       dockerfile: apps/repo-fetcher-service/Dockerfile
     environment:
-      MONGODB_URI: mongodb://mongodb:27017/repoLens
+      MONGODB_URI: ${MONGODB_URI:-mongodb://host.docker.internal:27017/repoLens}
       RABBITMQ_URL: amqp://repolens:repolens2411@rabbitmq:5672
       WORKSPACES_ROOT: /workspaces
       ZIP_SIZE_LIMIT_MB: '200'
@@ -63,9 +50,9 @@ services:
     restart: unless-stopped
     volumes:
       - workspaces-data:/workspaces
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
     depends_on:
-      mongodb:
-        condition: service_healthy
       rabbitmq:
         condition: service_healthy
 
@@ -74,7 +61,7 @@ services:
       context: ../..
       dockerfile: apps/vibe-review-service/Dockerfile
     environment:
-      MONGODB_URI: mongodb://mongodb:27017/repoLens
+      MONGODB_URI: ${MONGODB_URI:-mongodb://host.docker.internal:27017/repoLens}
       RABBITMQ_URL: amqp://repolens:repolens2411@rabbitmq:5672
       WORKSPACES_ROOT: /workspaces
       REVIEW_TIMEOUT_MS: '600000'
@@ -83,9 +70,9 @@ services:
     restart: unless-stopped
     volumes:
       - workspaces-data:/workspaces
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
     depends_on:
-      mongodb:
-        condition: service_healthy
       rabbitmq:
         condition: service_healthy
 
@@ -103,5 +90,4 @@ services:
         condition: service_started
 
 volumes:
-  mongo-data:
   workspaces-data:

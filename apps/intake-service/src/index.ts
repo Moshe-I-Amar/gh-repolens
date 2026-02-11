@@ -19,6 +19,7 @@ const logger = createLogger({
 
 const ALLOWED_MONGO_URIS = new Set([
   'mongodb://localhost:27017/repoLens',
+  'mongodb://host.docker.internal:27017/repoLens',
   'mongodb://mongodb:27017/repoLens',
 ]);
 const START_RETRY_DELAY_MS = Number(process.env.START_RETRY_DELAY_MS ?? 5000);
