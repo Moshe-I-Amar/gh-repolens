@@ -36,7 +36,7 @@ Environment variables are defined in `.env.example` files and referenced in Dock
 
 Root `.env` (shared defaults used by services):
 - `MONGODB_URI` (required): MongoDB connection string. Example: `mongodb://mongodb:27017/repolens`.
-- `RABBITMQ_URL` (required): RabbitMQ connection string. Example: `amqp://rabbitmq:5672`.
+- `RABBITMQ_URL` (required): RabbitMQ connection string. Example: `amqp://repolens:repolens2411@rabbitmq:5672`.
 - `WORKSPACES_ROOT` (required): shared directory for repo extraction. Example: `/workspaces`.
 - `LOG_LEVEL` (optional): `info`, `debug`, etc.
 

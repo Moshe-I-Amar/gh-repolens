@@ -4,7 +4,7 @@ metadata:
   name: repolens-config
 data:
   MONGODB_URI: mongodb://localhost:27017/repoLens
-  RABBITMQ_URL: amqp://rabbitmq:5672
+  RABBITMQ_URL: amqp://repolens:repolens2411@rabbitmq:5672
   WORKSPACES_ROOT: /workspaces
   LOG_LEVEL: info
   ZIP_SIZE_LIMIT_MB: '200'

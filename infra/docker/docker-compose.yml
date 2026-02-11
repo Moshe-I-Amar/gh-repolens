@@ -15,6 +15,9 @@ services:
   rabbitmq:
     image: rabbitmq:3.13-management
     restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: repolens
+      RABBITMQ_DEFAULT_PASS: repolens2411
     ports:
       - '5672:5672'
       - '15672:15672'
@@ -31,7 +34,7 @@ services:
     environment:
       PORT: '3001'
       MONGODB_URI: mongodb://mongodb:27017/repoLens
-      RABBITMQ_URL: amqp://rabbitmq:5672
+      RABBITMQ_URL: amqp://repolens:repolens2411@rabbitmq:5672
       LOG_LEVEL: info
       START_RETRY_DELAY_MS: '5000'
     restart: unless-stopped
@@ -49,7 +52,7 @@ services:
       dockerfile: apps/repo-fetcher-service/Dockerfile
     environment:
       MONGODB_URI: mongodb://mongodb:27017/repoLens
-      RABBITMQ_URL: amqp://rabbitmq:5672
+      RABBITMQ_URL: amqp://repolens:repolens2411@rabbitmq:5672
       WORKSPACES_ROOT: /workspaces
       ZIP_SIZE_LIMIT_MB: '200'
       ZIP_FILE_COUNT_LIMIT: '50000'
@@ -72,7 +75,7 @@ services:
       dockerfile: apps/vibe-review-service/Dockerfile
     environment:
       MONGODB_URI: mongodb://mongodb:27017/repoLens
-      RABBITMQ_URL: amqp://rabbitmq:5672
+      RABBITMQ_URL: amqp://repolens:repolens2411@rabbitmq:5672
       WORKSPACES_ROOT: /workspaces
       REVIEW_TIMEOUT_MS: '600000'
       LOG_LEVEL: info
