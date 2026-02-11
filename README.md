@@ -6,7 +6,7 @@ GitHub repo scan platform that ingests a GitHub URL, fetches the repository arch
 - User submits a GitHub repo URL in the web client.
 - Intake service validates the URL, creates a job in MongoDB, and publishes a `job.created` message.
 - Repo Fetcher downloads and extracts the repo into a shared workspace, updates the job to `FETCHED`, and publishes `job.fetched`.
-- Vibe Review service runs the review workflow, stores results on the job, and marks the job `COMPLETED` (or `FAILED`).
+- Vibe Review service loads repository files, asks Codex review prompts, stores results on the job, and marks the job `COMPLETED` (or `FAILED`).
 - Web client polls for jobs and renders review results.
 
 **Architecture**
@@ -66,6 +66,11 @@ Root and service-level `.env` files control runtime. These are the variables use
 - `DOWNLOAD_TIMEOUT_MS`: download timeout in ms (repo-fetcher).
 - `EXTRACT_TIMEOUT_MS`: extraction timeout in ms (repo-fetcher).
 - `REVIEW_TIMEOUT_MS`: review timeout in ms (vibe-review).
+- `REVIEW_USE_CODEX`: enable Codex-backed review (`true`/`false`, default `true`).
+- `REVIEW_MODEL`: model name used by the review worker (default `codex-mini-latest`).
+- `REVIEW_MAX_CONTEXT_CHARS`: max characters of repo content sent to Codex per question.
+- `REVIEW_MAX_FILE_CHARS`: max characters per file included in the Codex prompt.
+- `OPENAI_API_KEY`: API key used by the review worker to call Codex.
 - `VITE_API_BASE_URL`: web client API base URL.
 
 **API (Intake Service)**

@@ -62,6 +62,11 @@ Root `.env` (shared defaults used by services):
 - `WORKSPACES_ROOT` (required).
 - `LOG_LEVEL` (optional).
 - `REVIEW_TIMEOUT_MS` (optional): review timeout (default `600000`).
+- `REVIEW_USE_CODEX` (optional): enable Codex-backed review (default `true`).
+- `REVIEW_MODEL` (optional): Codex model used for review prompts (default `codex-mini-latest`).
+- `REVIEW_MAX_CONTEXT_CHARS` (optional): max repo context characters sent per question (default `180000`).
+- `REVIEW_MAX_FILE_CHARS` (optional): max characters from each file included in prompts (default `4000`).
+- `OPENAI_API_KEY` (required when `REVIEW_USE_CODEX=true`): key used by vibe-review worker for Codex API.
 
 `apps/web-client/.env`:
 - `VITE_API_BASE_URL` (required): intake API base URL. Example: `http://localhost:3001`.

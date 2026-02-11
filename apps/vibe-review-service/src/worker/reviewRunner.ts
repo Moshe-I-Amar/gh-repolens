@@ -1,11 +1,13 @@
 import path from 'path';
 import { promises as fs } from 'fs';
 
+import OpenAI from 'openai';
 import { createLogger } from '@repolens/shared-utils';
 import { ReviewAnswer, ReviewResults, ReviewSeverity } from '@repolens/shared-types';
+import { z } from 'zod';
 
 import { reviewQuestions } from '../review/questions';
-import { reviewAnswerSchema, reviewResultsSchema } from '../review/schemas';
+import { reviewAnswerSchema, reviewRefSchema, reviewResultsSchema } from '../review/schemas';
 import { calculateRiskSummary } from './riskScoring';
 
 const logger = createLogger({
@@ -16,6 +18,11 @@ const logger = createLogger({
 const MAX_FILE_BYTES = 300 * 1024;
 const MAX_FILES = 300;
 const REVIEW_TIMEOUT_MS = Number(process.env.REVIEW_TIMEOUT_MS ?? 600000);
+const REVIEW_MODEL = process.env.REVIEW_MODEL ?? 'codex-mini-latest';
+const REVIEW_USE_CODEX = (process.env.REVIEW_USE_CODEX ?? 'true').toLowerCase() !== 'false';
+const REVIEW_MAX_CONTEXT_CHARS = Number(process.env.REVIEW_MAX_CONTEXT_CHARS ?? 180_000);
+const REVIEW_MAX_FILE_CHARS = Number(process.env.REVIEW_MAX_FILE_CHARS ?? 4_000);
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY?.trim();
 const ignoredDirectories = new Set([
   '.git',
   'node_modules',
@@ -52,6 +59,12 @@ const readableExtensions = new Set([
   '.css',
   '.scss',
 ]);
+const normalizedSeverities: ReviewSeverity[] = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO', 'UNKNOWN'];
+const aiAnswerSchema = z.object({
+  severity: z.string().min(1),
+  answer: z.string().min(1),
+  refs: z.array(reviewRefSchema).default([]),
+});
 
 type RepoFile = {
   path: string;
@@ -64,6 +77,14 @@ type Finding = {
   line: number;
   reason: string;
 };
+
+type RuleAssessment = { severity: ReviewSeverity; findings: Finding[]; answer: string };
+
+const openai = OPENAI_API_KEY
+  ? new OpenAI({
+      apiKey: OPENAI_API_KEY,
+    })
+  : null;
 
 const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number, label: string) =>
   Promise.race([
@@ -138,6 +159,146 @@ const findLine = (lines: string[], test: (line: string) => boolean) => {
 
 const toRefs = (findings: Finding[]) =>
   findings.slice(0, 20).map((finding) => ({ path: finding.path, line: finding.line }));
+
+const normalizeSeverity = (value: string): ReviewSeverity => {
+  const upper = value.toUpperCase();
+  return (normalizedSeverities.find((severity) => severity === upper) ?? 'UNKNOWN') as ReviewSeverity;
+};
+
+const buildRepoContext = (repoFiles: RepoFile[]): string => {
+  const header = [
+    `Repository files included for review: ${repoFiles.length}`,
+    `Each file is truncated to at most ${REVIEW_MAX_FILE_CHARS} characters.`,
+  ].join('\n');
+
+  let remaining = Math.max(REVIEW_MAX_CONTEXT_CHARS - header.length, 0);
+  const chunks: string[] = [];
+  let includedCount = 0;
+
+  for (const file of repoFiles) {
+    if (remaining <= 0) {
+      break;
+    }
+    const truncated = file.content.slice(0, REVIEW_MAX_FILE_CHARS);
+    const fileChunk = [
+      `\nFILE: ${file.path}`,
+      '```',
+      truncated,
+      '```',
+    ].join('\n');
+
+    if (fileChunk.length > remaining) {
+      break;
+    }
+
+    chunks.push(fileChunk);
+    remaining -= fileChunk.length;
+    includedCount += 1;
+  }
+
+  const omittedCount = repoFiles.length - includedCount;
+  const footer =
+    omittedCount > 0
+      ? `\n\n${omittedCount} file(s) omitted due to context limit ${REVIEW_MAX_CONTEXT_CHARS} chars.`
+      : '';
+
+  return `${header}${chunks.join('')}${footer}`;
+};
+
+const extractResponseText = (response: unknown): string => {
+  const value = response as {
+    output_text?: unknown;
+    output?: Array<{ content?: Array<{ text?: unknown }> }>;
+  };
+
+  if (typeof value.output_text === 'string' && value.output_text.trim().length > 0) {
+    return value.output_text.trim();
+  }
+
+  const chunks: string[] = [];
+  for (const item of value.output ?? []) {
+    for (const content of item.content ?? []) {
+      if (typeof content.text === 'string' && content.text.trim().length > 0) {
+        chunks.push(content.text.trim());
+      }
+    }
+  }
+
+  return chunks.join('\n').trim();
+};
+
+const parseJsonObject = (raw: string): unknown => {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    const start = raw.indexOf('{');
+    const end = raw.lastIndexOf('}');
+    if (start === -1 || end <= start) {
+      throw new Error('INVALID_MODEL_JSON');
+    }
+    return JSON.parse(raw.slice(start, end + 1));
+  }
+};
+
+const answerWithCodex = async (
+  jobId: string,
+  question: (typeof reviewQuestions)[number],
+  repoContext: string,
+): Promise<ReviewAnswer> => {
+  if (!openai) {
+    throw new Error('OPENAI_API_KEY_MISSING');
+  }
+
+  const prompt = [
+    'You are a senior application security and architecture reviewer.',
+    'Analyze the provided repository snippets and answer exactly in JSON format:',
+    '{"severity":"CRITICAL|HIGH|MEDIUM|LOW|INFO|UNKNOWN","answer":"string","refs":[{"path":"string","line":number}]}.',
+    'Rules:',
+    '- Keep answer focused on concrete findings.',
+    '- Use refs for specific files/lines when available.',
+    '- If insufficient evidence, set severity to INFO or UNKNOWN and explain what is missing.',
+    '',
+    `Question ID: ${question.id}`,
+    `Question Title: ${question.title}`,
+    `Question Category: ${question.category}`,
+    `Question Prompt: ${question.prompt}`,
+    '',
+    repoContext,
+  ].join('\n');
+
+  const response = await openai.responses.create({
+    model: REVIEW_MODEL,
+    input: prompt,
+  });
+
+  const outputText = extractResponseText(response);
+  if (!outputText) {
+    throw new Error('EMPTY_CODEX_RESPONSE');
+  }
+
+  const parsed = aiAnswerSchema.parse(parseJsonObject(outputText));
+
+  logger.info(
+    {
+      jobId,
+      stage: 'REVIEWING',
+      questionId: question.id,
+      provider: 'codex',
+      model: REVIEW_MODEL,
+      refsCount: parsed.refs.length,
+    },
+    'Codex response parsed successfully',
+  );
+
+  return {
+    id: question.id,
+    title: question.title,
+    category: question.category,
+    severity: normalizeSeverity(parsed.severity),
+    answer: parsed.answer,
+    refs: parsed.refs.slice(0, 20),
+  };
+};
 
 const summarizeNoIssues = (repoFiles: RepoFile[], justification: string) =>
   `Inspected ${repoFiles.length} readable files. ${justification}`;
@@ -438,6 +599,34 @@ const summarizeReview = (repoFiles: RepoFile[], answers: ReviewAnswer[]) => {
   };
 };
 
+const answerWithRules = (
+  question: (typeof reviewQuestions)[number],
+  repoFiles: RepoFile[],
+  answers: ReviewAnswer[],
+): ReviewAnswer => {
+  const assessment: RuleAssessment =
+    question.id === 'security-sql-injection'
+      ? assessSqlInjection(repoFiles)
+      : question.id === 'security-xss'
+        ? assessXss(repoFiles)
+        : question.id === 'security-authz'
+          ? assessAuthz(repoFiles)
+          : question.id === 'security-secrets'
+            ? assessSecrets(repoFiles)
+            : question.id === 'security-dependency-vulns'
+              ? assessDependencies(repoFiles)
+              : summarizeReview(repoFiles, answers);
+
+  return {
+    id: question.id,
+    title: question.title,
+    category: question.category,
+    severity: assessment.severity,
+    answer: assessment.answer,
+    refs: toRefs(assessment.findings),
+  };
+};
+
 // Stores results while preserving partial progress.
 export const formatAndStoreResults = async (jobId: string, results: ReviewAnswer[]) => {
   const normalizedAnswers = results.map((result) => reviewAnswerSchema.parse(result));
@@ -465,16 +654,24 @@ export const runReviewForJob = async (jobId: string, repoRoot: string): Promise<
   const answers: ReviewAnswer[] = [];
 
   const run = async () => {
+    if (REVIEW_USE_CODEX && !openai) {
+      throw new Error('OPENAI_API_KEY_MISSING');
+    }
+
     const repoFiles = await scanRepoFiles(repoRoot);
     if (repoFiles.length === 0) {
       throw new Error('NO_READABLE_FILES');
     }
+    const repoContext = buildRepoContext(repoFiles);
+
     logger.info(
       {
         jobId,
         stage: 'REVIEWING',
         fileCount: repoFiles.length,
         samplePaths: repoFiles.slice(0, 10).map((file) => file.path),
+        reviewEngine: REVIEW_USE_CODEX ? 'codex' : 'rules',
+        model: REVIEW_USE_CODEX ? REVIEW_MODEL : undefined,
       },
       'Loaded real repository files for analysis',
     );
@@ -485,35 +682,19 @@ export const runReviewForJob = async (jobId: string, repoRoot: string): Promise<
           { jobId, stage: 'REVIEWING', questionId: question.id },
           'Starting question analysis',
         );
-        const assessment =
-          question.id === 'security-sql-injection'
-            ? assessSqlInjection(repoFiles)
-            : question.id === 'security-xss'
-              ? assessXss(repoFiles)
-              : question.id === 'security-authz'
-                ? assessAuthz(repoFiles)
-                : question.id === 'security-secrets'
-                  ? assessSecrets(repoFiles)
-                  : question.id === 'security-dependency-vulns'
-                    ? assessDependencies(repoFiles)
-                    : summarizeReview(repoFiles, answers);
 
-        const refs = toRefs(assessment.findings);
-        answers.push({
-          id: question.id,
-          title: question.title,
-          category: question.category,
-          severity: assessment.severity,
-          answer: assessment.answer,
-          refs,
-        });
+        const answer = REVIEW_USE_CODEX
+          ? await answerWithCodex(jobId, question, repoContext)
+          : answerWithRules(question, repoFiles, answers);
+
+        answers.push(answer);
         logger.info(
           {
             jobId,
             stage: 'REVIEWING',
             questionId: question.id,
-            severity: assessment.severity,
-            findingCount: assessment.findings.length,
+            severity: answer.severity,
+            findingCount: answer.refs.length,
           },
           'Completed question analysis',
         );

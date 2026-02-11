@@ -65,6 +65,11 @@ services:
       RABBITMQ_URL: amqp://repolens:repolens2411@rabbitmq:5672
       WORKSPACES_ROOT: /workspaces
       REVIEW_TIMEOUT_MS: '600000'
+      REVIEW_USE_CODEX: ${REVIEW_USE_CODEX:-true}
+      REVIEW_MODEL: ${REVIEW_MODEL:-codex-mini-latest}
+      REVIEW_MAX_CONTEXT_CHARS: ${REVIEW_MAX_CONTEXT_CHARS:-180000}
+      REVIEW_MAX_FILE_CHARS: ${REVIEW_MAX_FILE_CHARS:-4000}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       LOG_LEVEL: info
       START_RETRY_DELAY_MS: '5000'
     restart: unless-stopped

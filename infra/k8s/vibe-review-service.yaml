@@ -19,6 +19,8 @@ spec:
           envFrom:
             - configMapRef:
                 name: repolens-config
+            - secretRef:
+                name: repolens-secrets
           volumeMounts:
             - name: workspaces
               mountPath: /workspaces
