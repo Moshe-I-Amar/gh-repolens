@@ -193,6 +193,37 @@ header p {
   white-space: pre-wrap;
 }
 
+.finding {
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  padding: 10px;
+}
+
+.finding-title {
+  color: var(--ink);
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.finding-details,
+.finding-fix {
+  margin: 8px 0 0;
+  font-size: 13px;
+}
+
+.finding-code {
+  margin: 8px 0 0;
+  padding: 8px;
+  border-radius: 8px;
+  overflow-x: auto;
+  background: #f5f1e8;
+  color: #2b2b2f;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .accordion {
   border: 1px solid var(--border);
   border-radius: 14px;

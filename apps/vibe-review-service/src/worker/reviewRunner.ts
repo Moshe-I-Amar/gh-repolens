@@ -3,8 +3,13 @@ import { promises as fs } from 'fs';
 
 import OpenAI from 'openai';
 import { createLogger } from '@repolens/shared-utils';
-import { ReviewAnswer, ReviewResults, ReviewSeverity } from '@repolens/shared-types';
 import { z } from 'zod';
+import {
+  ReviewAnswer,
+  ReviewFinding,
+  ReviewResults,
+  ReviewSeverity,
+} from '@repolens/shared-types';
 
 import { reviewQuestions } from '../review/questions';
 import { reviewAnswerSchema, reviewRefSchema, reviewResultsSchema } from '../review/schemas';
@@ -72,11 +77,7 @@ type RepoFile = {
   lines: string[];
 };
 
-type Finding = {
-  path: string;
-  line: number;
-  reason: string;
-};
+type Finding = ReviewFinding;
 
 type RuleAssessment = { severity: ReviewSeverity; findings: Finding[]; answer: string };
 
@@ -156,6 +157,32 @@ const findLine = (lines: string[], test: (line: string) => boolean) => {
   }
   return 1;
 };
+
+const formatCodeSnippet = (lines: string[], lineNumber: number, context: number = 1) => {
+  const start = Math.max(1, lineNumber - context);
+  const end = Math.min(lines.length, lineNumber + context);
+  const snippetLines: string[] = [];
+  for (let current = start; current <= end; current += 1) {
+    const line = lines[current - 1] ?? '';
+    snippetLines.push(`${String(current).padStart(4, ' ')} | ${line}`);
+  }
+  return snippetLines.join('\n');
+};
+
+const createFinding = (
+  file: RepoFile,
+  line: number,
+  reason: string,
+  details: string,
+  recommendation: string,
+): Finding => ({
+  path: file.path,
+  line,
+  reason,
+  details,
+  recommendation,
+  codeSnippet: formatCodeSnippet(file.lines, line),
+});
 
 const toRefs = (findings: Finding[]) =>
   findings.slice(0, 20).map((finding) => ({ path: finding.path, line: finding.line }));
@@ -305,18 +332,30 @@ const summarizeNoIssues = (repoFiles: RepoFile[], justification: string) =>
 
 const assessSqlInjection = (repoFiles: RepoFile[]): { severity: ReviewSeverity; findings: Finding[]; answer: string } => {
   const findings: Finding[] = [];
-  const patterns: Array<{ regex: RegExp; reason: string }> = [
+  const patterns: Array<{ regex: RegExp; reason: string; details: string; recommendation: string }> = [
     {
       regex: /(query|execute)\s*\(\s*`[^`]*\$\{/i,
       reason: 'Dynamic SQL template interpolation in query execution',
+      details:
+        'Template literal interpolation can splice unsanitized user input directly into SQL text, bypassing query parameterization.',
+      recommendation:
+        'Use parameterized queries or ORM bind parameters and keep user input out of SQL string construction.',
     },
     {
       regex: /(query|execute)\s*\(\s*["'][^"']*\+/i,
       reason: 'String concatenation used to build SQL query',
+      details:
+        'SQL assembled with string concatenation increases injection risk when values flow from request or other untrusted input.',
+      recommendation:
+        'Replace concatenation with placeholders and pass values in the query parameter array/object.',
     },
     {
       regex: /sequelize\.query\s*\(.*\+/i,
       reason: 'sequelize.query appears to use concatenated SQL',
+      details:
+        'Raw sequelize.query with concatenated text may execute attacker-controlled SQL fragments if any value is untrusted.',
+      recommendation:
+        'Use replacements/bind options in sequelize.query and validate input constraints before query execution.',
     },
   ];
 
@@ -325,10 +364,14 @@ const assessSqlInjection = (repoFiles: RepoFile[]): { severity: ReviewSeverity; 
       if (!pattern.regex.test(file.content)) {
         continue;
       }
+      const line = findLine(file.lines, (lineContent) => pattern.regex.test(lineContent));
       findings.push({
         path: file.path,
-        line: findLine(file.lines, (line) => pattern.regex.test(line)),
+        line,
         reason: pattern.reason,
+        details: pattern.details,
+        recommendation: pattern.recommendation,
+        codeSnippet: formatCodeSnippet(file.lines, line),
       });
     }
   }
@@ -356,18 +399,30 @@ const assessSqlInjection = (repoFiles: RepoFile[]): { severity: ReviewSeverity; 
 
 const assessXss = (repoFiles: RepoFile[]): { severity: ReviewSeverity; findings: Finding[]; answer: string } => {
   const findings: Finding[] = [];
-  const patterns: Array<{ regex: RegExp; reason: string }> = [
+  const patterns: Array<{ regex: RegExp; reason: string; details: string; recommendation: string }> = [
     {
       regex: /dangerouslySetInnerHTML/,
       reason: 'dangerouslySetInnerHTML is used and requires strict sanitization',
+      details:
+        'Raw HTML rendering can execute attacker-controlled scripts if the content source is not sanitized and encoded correctly.',
+      recommendation:
+        'Avoid raw HTML where possible; otherwise sanitize with a trusted sanitizer and enforce a strict content security policy.',
     },
     {
       regex: /\.innerHTML\s*=/,
       reason: 'Direct DOM innerHTML assignment can allow script injection',
+      details:
+        'Assigning untrusted strings to innerHTML can inject script-capable markup into the DOM.',
+      recommendation:
+        'Use textContent for plain text output, or sanitize before assigning to innerHTML.',
     },
     {
       regex: /v-html\s*=/,
       reason: 'Vue v-html renders raw HTML and can introduce XSS',
+      details:
+        'v-html bypasses default escaping and can render attacker-supplied markup directly.',
+      recommendation:
+        'Prefer escaped template rendering; if v-html is required, sanitize input with an allowlist-based sanitizer.',
     },
   ];
 
@@ -376,10 +431,14 @@ const assessXss = (repoFiles: RepoFile[]): { severity: ReviewSeverity; findings:
       if (!pattern.regex.test(file.content)) {
         continue;
       }
+      const line = findLine(file.lines, (lineContent) => pattern.regex.test(lineContent));
       findings.push({
         path: file.path,
-        line: findLine(file.lines, (line) => pattern.regex.test(line)),
+        line,
         reason: pattern.reason,
+        details: pattern.details,
+        recommendation: pattern.recommendation,
+        codeSnippet: formatCodeSnippet(file.lines, line),
       });
     }
   }
@@ -419,9 +478,13 @@ const assessAuthz = (repoFiles: RepoFile[]): { severity: ReviewSeverity; finding
       continue;
     }
     findings.push({
-      path: file.path,
-      line: findLine(file.lines, (line) => routePattern.test(line)),
-      reason: 'Route handlers found without visible auth/authz middleware markers in same file',
+      ...createFinding(
+        file,
+        findLine(file.lines, (line) => routePattern.test(line)),
+        'Route handlers found without visible auth/authz middleware markers in same file',
+        'This route file defines request handlers but no obvious authentication/authorization checks are present nearby.',
+        'Add explicit auth middleware and role/ownership checks on sensitive endpoints.',
+      ),
     });
   }
 
@@ -448,14 +511,22 @@ const assessAuthz = (repoFiles: RepoFile[]): { severity: ReviewSeverity; finding
 
 const assessSecrets = (repoFiles: RepoFile[]): { severity: ReviewSeverity; findings: Finding[]; answer: string } => {
   const findings: Finding[] = [];
-  const patterns: Array<{ regex: RegExp; reason: string }> = [
+  const patterns: Array<{ regex: RegExp; reason: string; details: string; recommendation: string }> = [
     {
       regex: /\b(api[_-]?key|secret|token|password)\b\s*[:=]\s*['"][^'"]{8,}['"]/i,
       reason: 'Potential hardcoded credential/token value',
+      details:
+        'The pattern suggests a secret-like value is embedded in source/config, which can leak through VCS, logs, or package artifacts.',
+      recommendation:
+        'Move secrets to environment variables or a secret manager and rotate any exposed values.',
     },
     {
       regex: /-----BEGIN (RSA|EC|OPENSSH|PRIVATE) KEY-----/,
       reason: 'Private key material present in repository file',
+      details:
+        'Private key material in a repository is highly sensitive and can allow unauthorized access if compromised.',
+      recommendation:
+        'Remove committed key material, rotate affected keys, and store credentials in secure secret storage.',
     },
   ];
 
@@ -464,10 +535,14 @@ const assessSecrets = (repoFiles: RepoFile[]): { severity: ReviewSeverity; findi
       if (!pattern.regex.test(file.content)) {
         continue;
       }
+      const line = findLine(file.lines, (lineContent) => pattern.regex.test(lineContent));
       findings.push({
         path: file.path,
-        line: findLine(file.lines, (line) => pattern.regex.test(line)),
+        line,
         reason: pattern.reason,
+        details: pattern.details,
+        recommendation: pattern.recommendation,
+        codeSnippet: formatCodeSnippet(file.lines, line),
       });
     }
   }
@@ -533,20 +608,32 @@ const assessDependencies = (
       continue;
     }
     const file = repoFiles.find((item) => item.path.endsWith('package.json'));
+    const line = file ? findLine(file.lines, (lineText) => lineText.includes(`"${packageName}"`)) : 1;
     findings.push({
       path: file?.path ?? 'package.json',
-      line: file ? findLine(file.lines, (line) => line.includes(`"${packageName}"`)) : 1,
+      line,
       reason: `Dependency ${packageName} is considered high-risk/deprecated`,
+      details:
+        'The dependency appears on a high-risk/deprecated watchlist and may introduce known security or maintenance risks.',
+      recommendation:
+        'Replace with a maintained alternative and run dependency vulnerability scanning as part of CI.',
+      codeSnippet: file ? formatCodeSnippet(file.lines, line) : '   1 | package.json not found in scanned files',
     });
   }
 
   for (const item of nonPinned) {
     const packageName = item.split('@')[0] ?? item;
     const file = repoFiles.find((repoFile) => repoFile.path.endsWith('package.json'));
+    const line = file ? findLine(file.lines, (lineText) => lineText.includes(packageName)) : 1;
     findings.push({
       path: file?.path ?? 'package.json',
-      line: file ? findLine(file.lines, (line) => line.includes(packageName)) : 1,
+      line,
       reason: `Dependency version is non-pinned (${item})`,
+      details:
+        'Using wildcard/latest versions can pull unreviewed releases and make builds non-reproducible.',
+      recommendation:
+        'Pin exact or constrained versions and use lockfile verification in CI.',
+      codeSnippet: file ? formatCodeSnippet(file.lines, line) : '   1 | package.json not found in scanned files',
     });
   }
 
@@ -587,10 +674,9 @@ const summarizeReview = (repoFiles: RepoFile[], answers: ReviewAnswer[]) => {
   return {
     severity: 'MEDIUM' as ReviewSeverity,
     findings: actionable.flatMap((answer) =>
-      answer.refs.slice(0, 3).map((ref) => ({
-        path: ref.path,
-        line: ref.line ?? 1,
-        reason: `${answer.id} reported ${answer.severity}`,
+      (answer.findings ?? []).slice(0, 3).map((finding) => ({
+        ...finding,
+        reason: `${answer.id} reported ${answer.severity}: ${finding.reason}`,
       })),
     ),
     answer: `Found ${actionable.length} question(s) with non-INFO severity: ${actionable
@@ -624,6 +710,7 @@ const answerWithRules = (
     severity: assessment.severity,
     answer: assessment.answer,
     refs: toRefs(assessment.findings),
+    findings: assessment.findings.slice(0, 10),
   };
 };
 

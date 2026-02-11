@@ -20,6 +20,15 @@ export const reviewRefSchema = z.object({
   endLine: z.number().int().positive().optional(),
 });
 
+export const reviewFindingSchema = z.object({
+  path: z.string().min(1),
+  line: z.number().int().positive(),
+  reason: z.string().min(1),
+  details: z.string().min(1),
+  recommendation: z.string().min(1),
+  codeSnippet: z.string().min(1),
+});
+
 export const reviewAnswerSchema = z.object({
   id: z.string().min(1),
   title: z.string().min(1),
@@ -27,6 +36,7 @@ export const reviewAnswerSchema = z.object({
   severity: z.string().min(1),
   answer: z.string().min(1),
   refs: z.array(reviewRefSchema),
+  findings: z.array(reviewFindingSchema).optional(),
 });
 
 export const riskCountsSchema = z.object({

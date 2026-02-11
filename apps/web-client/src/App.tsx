@@ -9,6 +9,14 @@ type JobStatus =
   | 'FAILED';
 
 type ReviewAnswer = {
+  findings?: Array<{
+    path: string;
+    line: number;
+    reason: string;
+    details: string;
+    recommendation: string;
+    codeSnippet: string;
+  }>;
   id: string;
   title: string;
   category: string;
@@ -317,7 +325,21 @@ export default function App() {
                       <span>{question.category}</span>
                       <span>Severity: {question.severity}</span>
                     </div>
-                    {expanded[question.id] && <div className="answer">{question.answer}</div>}
+                    {expanded[question.id] && (
+                      <div className="answer">
+                        <p>{question.answer}</p>
+                        {(question.findings ?? []).map((finding, index) => (
+                          <div key={`${question.id}-${finding.path}-${finding.line}-${index}`} className="finding">
+                            <div className="finding-title">
+                              {finding.path}:{finding.line} - {finding.reason}
+                            </div>
+                            <p className="finding-details">{finding.details}</p>
+                            <p className="finding-fix">Recommendation: {finding.recommendation}</p>
+                            <pre className="finding-code">{finding.codeSnippet}</pre>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ))}
                 {selectedJob.status !== 'COMPLETED' && (
