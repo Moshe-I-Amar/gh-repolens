@@ -720,6 +720,7 @@ export const formatAndStoreResults = async (jobId: string, results: ReviewAnswer
   const existing: ReviewResults = {
     questions: normalizedAnswers,
     riskSummary: calculateRiskSummary(normalizedAnswers),
+    reviewEngine: REVIEW_USE_CODEX ? 'OPENAI' : 'RULES',
   };
 
   logger.info(
@@ -729,6 +730,7 @@ export const formatAndStoreResults = async (jobId: string, results: ReviewAnswer
       questionCount: normalizedAnswers.length,
       riskLevel: existing.riskSummary?.level,
       riskScore: existing.riskSummary?.score,
+      reviewEngine: existing.reviewEngine,
     },
     'Computed review risk summary from real findings',
   );

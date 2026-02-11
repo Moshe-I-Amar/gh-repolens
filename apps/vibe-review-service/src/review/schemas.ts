@@ -57,6 +57,7 @@ export const riskSummarySchema = z.object({
 export const reviewResultsSchema = z.object({
   questions: z.array(reviewAnswerSchema),
   riskSummary: riskSummarySchema.optional(),
+  reviewEngine: z.enum(['OPENAI', 'RULES']).optional(),
 });
 
 export const jobFetchedPayloadSchema = z.object({

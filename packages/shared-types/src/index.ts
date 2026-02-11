@@ -41,4 +41,5 @@ export type RiskSummary = {
 export type ReviewResults = {
   questions: ReviewAnswer[];
   riskSummary?: RiskSummary;
+  reviewEngine?: 'OPENAI' | 'RULES';
 };

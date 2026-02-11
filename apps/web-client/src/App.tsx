@@ -30,7 +30,7 @@ type Job = {
   status: JobStatus;
   updatedAt: string;
   localPath?: string | null;
-  reviewResults?: { questions: ReviewAnswer[] } | null;
+  reviewResults?: { questions: ReviewAnswer[]; reviewEngine?: 'OPENAI' | 'RULES' } | null;
 };
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3001';
@@ -44,6 +44,9 @@ const isInProgress = (status: JobStatus) =>
   ['QUEUED', 'FETCHING', 'FETCHED', 'REVIEWING'].includes(status);
 
 const formatDate = (value: string) => new Date(value).toLocaleString();
+
+const reviewEngineLabel = (engine?: 'OPENAI' | 'RULES') =>
+  engine === 'OPENAI' ? 'OpenAI (Codex)' : engine === 'RULES' ? 'Local Rules' : 'Unknown';
 
 const validateRepoUrl = (value: string) => {
   const trimmed = value.trim();
@@ -309,6 +312,9 @@ export default function App() {
                   <p className="empty">
                     Download folder:{' '}
                     {selectedJob.localPath ? selectedJob.localPath : 'Pending workspace assignment'}
+                  </p>
+                  <p className="empty">
+                    Review engine: {reviewEngineLabel(selectedJob.reviewResults?.reviewEngine)}
                   </p>
                 </div>
                 <button type="button" onClick={() => setSelectedJob(null)}>
