@@ -105,6 +105,14 @@ const formatRef = (ref: ReviewRef) => {
   return `${ref.path}:${ref.line}-${ref.endLine}`;
 };
 
+const escapeHtml = (value: string) =>
+  value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+
 const sortByUpdatedAtDesc = (jobs: Job[]) =>
   [...jobs].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
 
@@ -378,6 +386,109 @@ export default function App() {
   };
 
   const isKnownInProgress = selectedJob ? inProgressStatuses.includes(selectedJob.status) : false;
+  const canExportReport = Boolean(
+    selectedJob &&
+      selectedJob.status === 'COMPLETED' &&
+      selectedJob.reviewResults &&
+      selectedJob.reviewResults.questions.length > 0,
+  );
+
+  const exportReportAsPdf = () => {
+    if (!selectedJob || !selectedJob.reviewResults || selectedJob.status !== 'COMPLETED') {
+      return;
+    }
+
+    const riskMarkup = selectedJob.reviewResults.riskSummary
+      ? `<div class="block"><strong>Risk Summary</strong><p>Level: ${escapeHtml(
+          selectedJob.reviewResults.riskSummary.level,
+        )} | Score: ${selectedJob.reviewResults.riskSummary.score}/100</p><p>CRITICAL: ${
+          selectedJob.reviewResults.riskSummary.counts.CRITICAL
+        }, HIGH: ${selectedJob.reviewResults.riskSummary.counts.HIGH}, MEDIUM: ${
+          selectedJob.reviewResults.riskSummary.counts.MEDIUM
+        }, LOW: ${selectedJob.reviewResults.riskSummary.counts.LOW}, INFO: ${
+          selectedJob.reviewResults.riskSummary.counts.INFO
+        }, UNKNOWN: ${selectedJob.reviewResults.riskSummary.counts.UNKNOWN}</p></div>`
+      : '';
+
+    const questionMarkup = selectedJob.reviewResults.questions
+      .map((question, questionIndex) => {
+        const refs = question.refs.length
+          ? `<ul>${question.refs
+              .map((ref) => `<li>${escapeHtml(formatRef(ref))}</li>`)
+              .join('')}</ul>`
+          : '<p>No references.</p>';
+        const findings = (question.findings ?? []).length
+          ? `<ul>${(question.findings ?? [])
+              .map(
+                (finding) =>
+                  `<li><strong>${escapeHtml(finding.path)}:${finding.line}${
+                    finding.endLine ? `-${finding.endLine}` : ''
+                  }</strong> - ${escapeHtml(finding.reason)}<br/>${escapeHtml(
+                    finding.details,
+                  )}<br/><em>Recommendation:</em> ${escapeHtml(finding.recommendation)}</li>`,
+              )
+              .join('')}</ul>`
+          : '<p>No findings.</p>';
+        return `<section class="question">
+          <h3>${questionIndex + 1}. ${escapeHtml(question.title)}</h3>
+          <p><strong>Category:</strong> ${escapeHtml(question.category)} | <strong>Severity:</strong> ${escapeHtml(
+            question.severity,
+          )}</p>
+          <p>${escapeHtml(question.answer)}</p>
+          <div class="block"><strong>References</strong>${refs}</div>
+          <div class="block"><strong>Findings</strong>${findings}</div>
+        </section>`;
+      })
+      .join('');
+
+    const content = `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>RepoLens Review Report</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; color: #1b1b1f; line-height: 1.4; }
+    h1 { margin: 0 0 4px; font-size: 22px; }
+    h2 { margin: 18px 0 8px; font-size: 18px; }
+    h3 { margin: 10px 0 6px; font-size: 15px; }
+    p { margin: 6px 0; white-space: pre-wrap; }
+    ul { margin: 6px 0 6px 18px; padding: 0; }
+    li { margin: 4px 0; }
+    .meta { margin-top: 10px; font-size: 13px; color: #333; }
+    .block { border: 1px solid #d6cfc2; border-radius: 8px; padding: 10px; margin: 8px 0; }
+    .question { border-top: 1px solid #ddd; padding-top: 10px; margin-top: 10px; page-break-inside: avoid; }
+  </style>
+</head>
+<body>
+  <h1>RepoLens Review Report</h1>
+  <div class="meta">
+    <p><strong>Repository:</strong> ${escapeHtml(selectedJob.repoUrl)}</p>
+    <p><strong>Job ID:</strong> ${escapeHtml(selectedJob._id)}</p>
+    <p><strong>Status:</strong> ${escapeHtml(statusLabel(selectedJob.status))}</p>
+    <p><strong>Created:</strong> ${escapeHtml(formatDate(selectedJob.createdAt))}</p>
+    <p><strong>Updated:</strong> ${escapeHtml(formatDate(selectedJob.updatedAt))}</p>
+    <p><strong>Review Engine:</strong> ${escapeHtml(
+      reviewEngineLabel(selectedJob.reviewResults.reviewEngine),
+    )}</p>
+  </div>
+  ${riskMarkup}
+  <h2>Questions (${selectedJob.reviewResults.questions.length})</h2>
+  ${questionMarkup}
+</body>
+</html>`;
+
+    const printWindow = window.open('', '_blank', 'noopener,noreferrer');
+    if (!printWindow) {
+      setFormError('Popup blocked. Allow popups to export PDF.');
+      return;
+    }
+
+    printWindow.document.open();
+    printWindow.document.write(content);
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.print();
+  };
 
   return (
     <div className="app">
@@ -599,9 +710,16 @@ export default function App() {
                     )}
                     {selectedJob.error && <p className="error-text">Failure reason: {selectedJob.error}</p>}
                   </div>
-                  <button type="button" onClick={() => setSelectedJobId(null)}>
-                    Close
-                  </button>
+                  <div className="detail-actions">
+                    {canExportReport && (
+                      <button type="button" className="export-btn" onClick={exportReportAsPdf}>
+                        Export PDF Report
+                      </button>
+                    )}
+                    <button type="button" onClick={() => setSelectedJobId(null)}>
+                      Close
+                    </button>
+                  </div>
                 </div>
                 <div className="jobs">
                   {(selectedJob.reviewResults?.questions ?? []).map((question) => (

@@ -280,6 +280,12 @@ header p {
   margin-bottom: 12px;
 }
 
+.detail-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
 .detail-header button {
   border: none;
   border-radius: 999px;
@@ -287,6 +293,11 @@ header p {
   background: var(--accent-2);
   font-weight: 600;
   cursor: pointer;
+}
+
+.detail-header .export-btn {
+  background: var(--accent-3);
+  color: #fff;
 }
 
 .empty {
