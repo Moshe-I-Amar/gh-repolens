@@ -1,4 +1,4 @@
-import { Channel } from 'amqplib';
+import { ConfirmChannel } from 'amqplib';
 
 import { createLogger } from '@repolens/shared-utils';
 
@@ -21,13 +21,13 @@ const getPayloadSummary = (payload: unknown) => {
   };
 };
 
-export const setupExchange = async (channel: Channel) => {
+export const setupExchange = async (channel: ConfirmChannel) => {
   await channel.assertExchange(JOBS_EXCHANGE, JOBS_EXCHANGE_TYPE, { durable: true });
   await channel.assertExchange(JOBS_DLX, 'fanout', { durable: true });
 };
 
 export const publishMessage = async (
-  channel: Channel,
+  channel: ConfirmChannel,
   routingKey: string,
   payload: unknown,
   logger = defaultLogger,
@@ -41,7 +41,8 @@ export const publishMessage = async (
 
   if (!published) {
     logger.error({ routingKey }, 'RabbitMQ publish returned false');
-    return;
+    throw new Error('RABBITMQ_PUBLISH_BUFFER_FULL');
   }
+  await channel.waitForConfirms();
   logger.info({ routingKey, payload: getPayloadSummary(payload) }, 'RabbitMQ message published');
 };

@@ -1,4 +1,4 @@
-import { Channel, ConsumeMessage } from 'amqplib';
+import { ConfirmChannel, ConsumeMessage } from 'amqplib';
 
 import { createLogger, logJobEvent } from '@repolens/shared-utils';
 
@@ -27,7 +27,7 @@ const getDeathCount = (message: ConsumeMessage, queueName: string): number => {
   return typeof count === 'number' ? count : 0;
 };
 
-export const setupJobFetchedQueue = async (channel: Channel, retryTtlMs: number) => {
+export const setupJobFetchedQueue = async (channel: ConfirmChannel, retryTtlMs: number) => {
   await channel.assertExchange(JOBS_EXCHANGE, JOBS_EXCHANGE_TYPE, { durable: true });
   await channel.assertExchange(JOBS_RETRY_EXCHANGE, 'direct', { durable: true });
   await channel.assertExchange(JOBS_DLX, 'fanout', { durable: true });
@@ -55,7 +55,7 @@ export const setupJobFetchedQueue = async (channel: Channel, retryTtlMs: number)
   await channel.bindQueue(QUEUES.vibeReview, JOBS_EXCHANGE, 'job.fetched');
 };
 
-const publishToDlq = async (channel: Channel, message: ConsumeMessage, logger = defaultLogger) => {
+const publishToDlq = async (channel: ConfirmChannel, message: ConsumeMessage, logger = defaultLogger) => {
   const published = channel.publish(JOBS_DLX, '', message.content, {
     contentType: message.properties.contentType ?? 'application/json',
     persistent: true,
@@ -67,7 +67,9 @@ const publishToDlq = async (channel: Channel, message: ConsumeMessage, logger = 
 
   if (!published) {
     logger.error('DLQ publish returned false');
+    throw new Error('RABBITMQ_DLX_PUBLISH_BUFFER_FULL');
   }
+  await channel.waitForConfirms();
 };
 
 type ConsumerOptions = {
@@ -78,7 +80,7 @@ type ConsumerOptions = {
 
 // Main consumer loop handling ack/nack and DLQ routing.
 export const startJobFetchedConsumer = async (
-  channel: Channel,
+  channel: ConfirmChannel,
   onMessage: (payload: unknown) => Promise<void>,
   logger = defaultLogger,
   options: ConsumerOptions = {},

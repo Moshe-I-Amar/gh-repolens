@@ -16,8 +16,9 @@ export const errorHandler = (
   _next: NextFunction,
 ) => {
   const correlationId = (req as CorrelationRequest).correlationId;
+  const includeStack = (process.env.NODE_ENV ?? '').toLowerCase() !== 'production';
   logger.error(
-    { correlationId, message: err.message, stack: err.stack },
+    { correlationId, message: err.message, stack: includeStack ? err.stack : undefined },
     'Unhandled error',
   );
   res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });

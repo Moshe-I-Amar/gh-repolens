@@ -5,7 +5,7 @@ import { promisify } from 'util';
 
 import { createLogger, logJobEvent } from '@repolens/shared-utils';
 
-import { Channel } from 'amqplib';
+import { ConfirmChannel } from 'amqplib';
 
 import { JobModel } from '../models/Job';
 import { ROUTING_KEYS } from '../queue/constants';
@@ -117,7 +117,7 @@ const cloneRepository = async (repoUrl: string, targetPath: string) => {
 
 // Main consumer handler for job.created messages.
 export const processJobCreatedMessage = async (
-  channel: Channel,
+  channel: ConfirmChannel,
   payload: { jobId?: string },
 ) => {
   const jobId = payload.jobId;

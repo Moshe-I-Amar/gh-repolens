@@ -1,4 +1,4 @@
-import { Channel, connect } from 'amqplib';
+import { ConfirmChannel, connect } from 'amqplib';
 import { createLogger } from '@repolens/shared-utils';
 
 type ConnectionModel = Awaited<ReturnType<typeof connect>>;
@@ -41,11 +41,11 @@ export const connectWithRetry = async (
   throw lastError;
 };
 
-export const createChannel = async (connection: ConnectionModel): Promise<Channel> => {
-  return connection.createChannel();
+export const createChannel = async (connection: ConnectionModel): Promise<ConfirmChannel> => {
+  return connection.createConfirmChannel();
 };
 
-type ChannelHandler = (channel: Channel) => Promise<void>;
+type ChannelHandler = (channel: ConfirmChannel) => Promise<void>;
 
 export const startRabbitChannel = async (
   url: string,
@@ -57,7 +57,7 @@ export const startRabbitChannel = async (
   const connectOnce = async () => {
     const connection = await connect(url);
     logger.info('RabbitMQ connected');
-    const channel = await connection.createChannel();
+    const channel = await connection.createConfirmChannel();
 
     const triggerReconnect = async (reason: string, error?: unknown) => {
       if (reconnecting) {

@@ -30,6 +30,19 @@ export const createLogger = (options: LoggerOptions = {}) => {
     level: options.level ?? 'info',
     base: Object.keys(base).length > 0 ? base : undefined,
     timestamp: pino.stdTimeFunctions.isoTime,
+    redact: {
+      paths: [
+        'authorization',
+        'Authorization',
+        'headers.authorization',
+        'headers.Authorization',
+        'OPENAI_API_KEY',
+        'openaiApiKey',
+        'apiKey',
+        '*.apiKey',
+      ],
+      censor: '[REDACTED]',
+    },
   });
 };
 

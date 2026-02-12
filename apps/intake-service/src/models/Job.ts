@@ -13,6 +13,66 @@ export type JobDocument = Document & {
   updatedAt: Date;
 };
 
+const reviewRefSchema = new Schema(
+  {
+    path: { type: String, required: true },
+    line: { type: Number, required: false },
+    endLine: { type: Number, required: false },
+  },
+  { _id: false },
+);
+
+const reviewFindingSchema = new Schema(
+  {
+    path: { type: String, required: true },
+    line: { type: Number, required: true },
+    endLine: { type: Number, required: false },
+    reason: { type: String, required: true },
+    details: { type: String, required: true },
+    recommendation: { type: String, required: true },
+    codeSnippet: { type: String, required: true },
+  },
+  { _id: false },
+);
+
+const reviewAnswerSchema = new Schema(
+  {
+    id: { type: String, required: true },
+    title: { type: String, required: true },
+    category: { type: String, required: true },
+    severity: { type: String, required: true },
+    answer: { type: String, required: true },
+    refs: { type: [reviewRefSchema], default: [] },
+    findings: { type: [reviewFindingSchema], required: false },
+  },
+  { _id: false },
+);
+
+const riskSummarySchema = new Schema(
+  {
+    level: { type: String, required: true },
+    score: { type: Number, required: true },
+    counts: {
+      CRITICAL: { type: Number, default: 0 },
+      HIGH: { type: Number, default: 0 },
+      MEDIUM: { type: Number, default: 0 },
+      LOW: { type: Number, default: 0 },
+      INFO: { type: Number, default: 0 },
+      UNKNOWN: { type: Number, default: 0 },
+    },
+  },
+  { _id: false },
+);
+
+const reviewResultsSchema = new Schema(
+  {
+    questions: { type: [reviewAnswerSchema], default: [] },
+    riskSummary: { type: riskSummarySchema, required: false },
+    reviewEngine: { type: String, enum: ['OPENAI', 'RULES'], required: false },
+  },
+  { _id: false },
+);
+
 // TODO: Schema duplication across services risks drift; consider centralizing when refactoring.
 const jobSchema = new Schema<JobDocument>(
   {
@@ -34,7 +94,7 @@ const jobSchema = new Schema<JobDocument>(
       default: null,
     },
     reviewResults: {
-      type: Schema.Types.Mixed,
+      type: reviewResultsSchema,
       default: null,
     },
     error: {
@@ -49,6 +109,7 @@ const jobSchema = new Schema<JobDocument>(
 
 jobSchema.index({ status: 1 });
 jobSchema.index({ createdAt: -1 });
+jobSchema.index({ updatedAt: -1 });
 
 export const JobModel =
   (mongoose.models.Job as mongoose.Model<JobDocument>) ||

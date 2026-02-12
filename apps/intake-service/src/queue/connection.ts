@@ -1,11 +1,11 @@
-import { Channel, connect } from 'amqplib';
+import { ConfirmChannel, connect } from 'amqplib';
 import { createLogger } from '@repolens/shared-utils';
 
 type ConnectionModel = Awaited<ReturnType<typeof connect>>;
 
-let channel: Channel | undefined;
+let channel: ConfirmChannel | undefined;
 let connectionModel: ConnectionModel | undefined;
-let reconnecting: Promise<Channel> | null = null;
+let reconnecting: Promise<ConfirmChannel> | null = null;
 
 type LoggerLike = {
   info: (obj: unknown, msg?: string) => void;
@@ -21,10 +21,10 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const maskRabbitUrl = (rabbitUrl: string) =>
   rabbitUrl.replace(/(amqps?:\/\/)([^@]+)@/i, '$1***@');
 
-const connectOnce = async (rabbitUrl: string, logger: LoggerLike): Promise<Channel> => {
+const connectOnce = async (rabbitUrl: string, logger: LoggerLike): Promise<ConfirmChannel> => {
   logger.info({ rabbitUrl: maskRabbitUrl(rabbitUrl) }, 'Connecting to RabbitMQ...');
   const activeConnection = await connect(rabbitUrl);
-  const activeChannel = await activeConnection.createChannel();
+  const activeChannel = await activeConnection.createConfirmChannel();
   logger.info({ rabbitUrl: maskRabbitUrl(rabbitUrl) }, 'RabbitMQ connected');
   connectionModel = activeConnection;
   channel = activeChannel;
@@ -73,7 +73,7 @@ const reconnectWithBackoff = async (rabbitUrl: string, logger: LoggerLike) => {
 export const getRabbitChannel = async (
   rabbitUrl: string,
   logger: LoggerLike = defaultLogger,
-): Promise<Channel> => {
+): Promise<ConfirmChannel> => {
   if (channel) {
     return channel;
   }
