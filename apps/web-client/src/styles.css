@@ -300,6 +300,13 @@ header p {
   color: #fff;
 }
 
+.detail-header .export-btn:disabled {
+  background: #9ea8b0;
+  color: #eef2f5;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
 .empty {
   color: var(--muted);
   font-size: 14px;

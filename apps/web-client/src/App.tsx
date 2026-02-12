@@ -711,11 +711,19 @@ export default function App() {
                     {selectedJob.error && <p className="error-text">Failure reason: {selectedJob.error}</p>}
                   </div>
                   <div className="detail-actions">
-                    {canExportReport && (
-                      <button type="button" className="export-btn" onClick={exportReportAsPdf}>
-                        Export PDF Report
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      className="export-btn"
+                      onClick={exportReportAsPdf}
+                      disabled={!canExportReport}
+                      title={
+                        canExportReport
+                          ? 'Export review report as PDF'
+                          : 'Available after review is completed'
+                      }
+                    >
+                      Export PDF Report
+                    </button>
                     <button type="button" onClick={() => setSelectedJobId(null)}>
                       Close
                     </button>
