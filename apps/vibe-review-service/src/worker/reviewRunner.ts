@@ -1,5 +1,5 @@
 import path from 'path';
-import { promises as fs } from 'fs';
+import { Dirent, promises as fs } from 'fs';
 
 import OpenAI from 'openai';
 import { createLogger } from '@repolens/shared-utils';
@@ -22,6 +22,7 @@ const logger = createLogger({
 
 const MAX_FILE_BYTES = 300 * 1024;
 const MAX_FILES = 300;
+const SCAN_INCLUDE_DEPRIORITIZED = (process.env.SCAN_INCLUDE_DEPRIORITIZED ?? 'false').toLowerCase() === 'true';
 const REVIEW_TIMEOUT_MS = Number(process.env.REVIEW_TIMEOUT_MS ?? 600000);
 const REVIEW_MODEL = process.env.REVIEW_MODEL ?? 'codex-mini-latest';
 const REVIEW_USE_CODEX = (process.env.REVIEW_USE_CODEX ?? 'true').toLowerCase() !== 'false';
@@ -39,6 +40,8 @@ const ignoredDirectories = new Set([
   '.idea',
   '.vscode',
 ]);
+const priorityRootDirectories = ['src', 'lib', 'apps', 'server'] as const;
+const deprioritizedDirectories = new Set(['examples', 'example', 'test', 'tests', 'docs', 'mocks', '__mocks__']);
 const readableExtensions = new Set([
   '.ts',
   '.tsx',
@@ -77,6 +80,22 @@ type RepoFile = {
   lines: string[];
 };
 
+type ScanStats = {
+  priorityPassCount: number;
+  nonPriorityPassCount: number;
+};
+
+type ScanResult = {
+  files: RepoFile[];
+  stats: ScanStats;
+};
+
+type ScanRepoFilesOptions = {
+  maxFiles?: number;
+  maxFileBytes?: number;
+  includeDeprioritized?: boolean;
+};
+
 type Finding = ReviewFinding;
 
 type RuleAssessment = { severity: ReviewSeverity; findings: Finding[]; answer: string };
@@ -97,16 +116,58 @@ const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number, label: str
 
 const isText = (content: string) => !content.includes('\u0000');
 
-const scanRepoFiles = async (repoRoot: string): Promise<RepoFile[]> => {
-  const files: RepoFile[] = [];
+const sortDirEntries = (entries: Dirent[]) =>
+  entries.slice().sort((a, b) => a.name.localeCompare(b.name));
 
-  const walk = async (currentDir: string) => {
-    if (files.length >= MAX_FILES) {
+export const scanRepoFiles = async (
+  repoRoot: string,
+  options: ScanRepoFilesOptions = {},
+): Promise<ScanResult> => {
+  const maxFiles = options.maxFiles ?? MAX_FILES;
+  const maxFileBytes = options.maxFileBytes ?? MAX_FILE_BYTES;
+  const includeDeprioritized = options.includeDeprioritized ?? SCAN_INCLUDE_DEPRIORITIZED;
+  const files: RepoFile[] = [];
+  const stats: ScanStats = {
+    priorityPassCount: 0,
+    nonPriorityPassCount: 0,
+  };
+
+  const addFile = async (absolutePath: string, pass: keyof ScanStats) => {
+    if (files.length >= maxFiles) {
       return;
     }
-    const entries = await fs.readdir(currentDir, { withFileTypes: true });
+    const filename = path.basename(absolutePath);
+    const extension = path.extname(filename).toLowerCase();
+    if (!readableExtensions.has(extension) && filename !== 'README') {
+      return;
+    }
+    try {
+      const fileStats = await fs.stat(absolutePath);
+      if (fileStats.size <= 0 || fileStats.size > maxFileBytes) {
+        return;
+      }
+      const content = await fs.readFile(absolutePath, 'utf8');
+      if (!isText(content)) {
+        return;
+      }
+      files.push({
+        path: path.relative(repoRoot, absolutePath),
+        content,
+        lines: content.split(/\r?\n/),
+      });
+      stats[pass] += 1;
+    } catch {
+      // Ignore unreadable files and continue real scan.
+    }
+  };
+
+  const walk = async (currentDir: string, pass: keyof ScanStats) => {
+    if (files.length >= maxFiles) {
+      return;
+    }
+    const entries = sortDirEntries(await fs.readdir(currentDir, { withFileTypes: true }));
     for (const entry of entries) {
-      if (files.length >= MAX_FILES) {
+      if (files.length >= maxFiles) {
         return;
       }
       const absolutePath = path.join(currentDir, entry.name);
@@ -114,38 +175,63 @@ const scanRepoFiles = async (repoRoot: string): Promise<RepoFile[]> => {
         if (ignoredDirectories.has(entry.name)) {
           continue;
         }
-        await walk(absolutePath);
+        if (!includeDeprioritized && deprioritizedDirectories.has(entry.name)) {
+          continue;
+        }
+        await walk(absolutePath, pass);
         continue;
       }
       if (!entry.isFile()) {
         continue;
       }
-      const extension = path.extname(entry.name).toLowerCase();
-      if (!readableExtensions.has(extension) && entry.name !== 'README') {
-        continue;
-      }
-      try {
-        const stats = await fs.stat(absolutePath);
-        if (stats.size <= 0 || stats.size > MAX_FILE_BYTES) {
-          continue;
-        }
-        const content = await fs.readFile(absolutePath, 'utf8');
-        if (!isText(content)) {
-          continue;
-        }
-        files.push({
-          path: path.relative(repoRoot, absolutePath),
-          content,
-          lines: content.split(/\r?\n/),
-        });
-      } catch {
-        // Ignore unreadable files and continue real scan.
-      }
+      await addFile(absolutePath, pass);
     }
   };
 
-  await walk(repoRoot);
-  return files;
+  for (const rootName of priorityRootDirectories) {
+    if (files.length >= maxFiles) {
+      break;
+    }
+    const priorityPath = path.join(repoRoot, rootName);
+    try {
+      const dirStats = await fs.stat(priorityPath);
+      if (!dirStats.isDirectory()) {
+        continue;
+      }
+      await walk(priorityPath, 'priorityPassCount');
+    } catch {
+      // Ignore missing priority roots.
+    }
+  }
+
+  if (files.length < maxFiles) {
+    const rootEntries = sortDirEntries(await fs.readdir(repoRoot, { withFileTypes: true }));
+    for (const entry of rootEntries) {
+      if (files.length >= maxFiles) {
+        break;
+      }
+      const absolutePath = path.join(repoRoot, entry.name);
+      if (entry.isDirectory()) {
+        if (ignoredDirectories.has(entry.name)) {
+          continue;
+        }
+        if (priorityRootDirectories.includes(entry.name as (typeof priorityRootDirectories)[number])) {
+          continue;
+        }
+        if (!includeDeprioritized && deprioritizedDirectories.has(entry.name)) {
+          continue;
+        }
+        await walk(absolutePath, 'nonPriorityPassCount');
+        continue;
+      }
+      if (!entry.isFile()) {
+        continue;
+      }
+      await addFile(absolutePath, 'nonPriorityPassCount');
+    }
+  }
+
+  return { files, stats };
 };
 
 const findLine = (lines: string[], test: (line: string) => boolean) => {
@@ -747,7 +833,8 @@ export const runReviewForJob = async (jobId: string, repoRoot: string): Promise<
       throw new Error('OPENAI_API_KEY_MISSING');
     }
 
-    const repoFiles = await scanRepoFiles(repoRoot);
+    const scanResult = await scanRepoFiles(repoRoot);
+    const repoFiles = scanResult.files;
     if (repoFiles.length === 0) {
       throw new Error('NO_READABLE_FILES');
     }
@@ -759,6 +846,8 @@ export const runReviewForJob = async (jobId: string, repoRoot: string): Promise<
         stage: 'REVIEWING',
         fileCount: repoFiles.length,
         samplePaths: repoFiles.slice(0, 10).map((file) => file.path),
+        priorityPassCount: scanResult.stats.priorityPassCount,
+        nonPriorityPassCount: scanResult.stats.nonPriorityPassCount,
         reviewEngine: REVIEW_USE_CODEX ? 'codex' : 'rules',
         model: REVIEW_USE_CODEX ? REVIEW_MODEL : undefined,
       },

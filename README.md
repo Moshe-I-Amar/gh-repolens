@@ -70,6 +70,7 @@ Root and service-level `.env` files control runtime. These are the variables use
 - `REVIEW_MODEL`: model name used by the review worker (default `codex-mini-latest`).
 - `REVIEW_MAX_CONTEXT_CHARS`: max characters of repo content sent to Codex per question.
 - `REVIEW_MAX_FILE_CHARS`: max characters per file included in the Codex prompt.
+- `SCAN_INCLUDE_DEPRIORITIZED`: include lower-priority roots like `docs/`, `tests/`, `examples/` in scan pass 2 (default `false`).
 - `OPENAI_API_KEY`: API key used by the review worker to call Codex.
 - `VITE_API_BASE_URL`: web client API base URL.
 

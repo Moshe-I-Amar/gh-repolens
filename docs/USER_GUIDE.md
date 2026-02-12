@@ -66,6 +66,7 @@ Root `.env` (shared defaults used by services):
 - `REVIEW_MODEL` (optional): Codex model used for review prompts (default `codex-mini-latest`).
 - `REVIEW_MAX_CONTEXT_CHARS` (optional): max repo context characters sent per question (default `180000`).
 - `REVIEW_MAX_FILE_CHARS` (optional): max characters from each file included in prompts (default `4000`).
+- `SCAN_INCLUDE_DEPRIORITIZED` (optional): include `docs/`, `tests/`, `examples/`, and mocks directories in the second scan pass (default `false`).
 - `OPENAI_API_KEY` (required when `REVIEW_USE_CODEX=true`): key used by vibe-review worker for Codex API.
 
 `apps/web-client/.env`:
