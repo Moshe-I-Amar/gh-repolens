@@ -6,13 +6,12 @@ import { createLogger } from '@repolens/shared-utils';
 import { z } from 'zod';
 import {
   ReviewAnswer,
-  ReviewFinding,
   ReviewResults,
   ReviewSeverity,
 } from '@repolens/shared-types';
 
 import { reviewQuestions } from '../review/questions';
-import { reviewAnswerSchema, reviewRefSchema, reviewResultsSchema } from '../review/schemas';
+import { reviewAnswerSchema, reviewResultsSchema } from '../review/schemas';
 import { calculateRiskSummary } from './riskScoring';
 
 const logger = createLogger({
@@ -28,6 +27,8 @@ const REVIEW_MODEL = process.env.REVIEW_MODEL ?? 'codex-mini-latest';
 const REVIEW_USE_CODEX = (process.env.REVIEW_USE_CODEX ?? 'true').toLowerCase() !== 'false';
 const REVIEW_MAX_CONTEXT_CHARS = Number(process.env.REVIEW_MAX_CONTEXT_CHARS ?? 180_000);
 const REVIEW_MAX_FILE_CHARS = Number(process.env.REVIEW_MAX_FILE_CHARS ?? 4_000);
+const OPENAI_MAX_FINDINGS = Number(process.env.OPENAI_MAX_FINDINGS ?? 12);
+const OPENAI_MAX_EVIDENCE_CHARS = Number(process.env.OPENAI_MAX_EVIDENCE_CHARS ?? 200);
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY?.trim();
 const ignoredDirectories = new Set([
   '.git',
@@ -94,16 +95,21 @@ const exactSpecialFilenames = new Set([
 ]);
 const specialFilenamePrefixes = ['eslint.config.', '.eslintrc.', '.prettierrc.'];
 const normalizedSeverities: ReviewSeverity[] = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO', 'UNKNOWN'];
+const aiFindingSchema = z.object({
+  path: z.string().min(1),
+  evidence: z.string().min(1).max(300),
+  severity: z.string().min(1).optional(),
+  explanation: z.string().min(1).optional(),
+});
 const aiAnswerSchema = z.object({
   severity: z.string().min(1),
   answer: z.string().min(1),
-  refs: z.array(reviewRefSchema).default([]),
+  findings: z.array(aiFindingSchema).max(25).default([]),
 });
 
-type RepoFile = {
+export type RepoFile = {
   path: string;
   content: string;
-  lines: string[];
 };
 
 type ScanStats = {
@@ -122,7 +128,15 @@ type ScanRepoFilesOptions = {
   includeDeprioritized?: boolean;
 };
 
-type Finding = ReviewFinding;
+type Finding = {
+  path: string;
+  line: number;
+  endLine?: number;
+  reason: string;
+  details: string;
+  recommendation: string;
+  codeSnippet: string;
+};
 
 type RuleAssessment = { severity: ReviewSeverity; findings: Finding[]; answer: string };
 
@@ -200,7 +214,6 @@ export const scanRepoFiles = async (
       files.push({
         path: relativePath,
         content,
-        lines: content.split(/\r?\n/),
       });
       stats[pass] += 1;
     } catch {
@@ -281,44 +294,185 @@ export const scanRepoFiles = async (
   return { files, stats };
 };
 
-const findLine = (lines: string[], test: (line: string) => boolean) => {
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index];
-    if (line !== undefined && test(line)) {
-      return index + 1;
+const clampIndex = (value: number, contentLength: number) => {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+  if (value < 0) {
+    return 0;
+  }
+  if (value > contentLength) {
+    return contentLength;
+  }
+  return Math.floor(value);
+};
+
+export const buildNewlineIndex = (content: string): number[] => {
+  const indexes: number[] = [];
+  for (let index = 0; index < content.length; index += 1) {
+    if (content.charCodeAt(index) === 10) {
+      indexes.push(index);
     }
   }
-  return 1;
+  return indexes;
 };
 
-const formatCodeSnippet = (lines: string[], lineNumber: number, context: number = 1) => {
-  const start = Math.max(1, lineNumber - context);
-  const end = Math.min(lines.length, lineNumber + context);
-  const snippetLines: string[] = [];
-  for (let current = start; current <= end; current += 1) {
-    const line = lines[current - 1] ?? '';
-    snippetLines.push(`${String(current).padStart(4, ' ')} | ${line}`);
+const countNewlinesBefore = (newlineIndexes: number[], offset: number) => {
+  let left = 0;
+  let right = newlineIndexes.length;
+  while (left < right) {
+    const middle = Math.floor((left + right) / 2);
+    const candidate = newlineIndexes[middle];
+    if (candidate !== undefined && candidate < offset) {
+      left = middle + 1;
+    } else {
+      right = middle;
+    }
   }
-  return snippetLines.join('\n');
+  return left;
 };
 
-const createFinding = (
+export const getLineInfo = (
+  content: string,
+  startIndex: number,
+  endIndex?: number,
+  newlineIndexes: number[] = buildNewlineIndex(content),
+): { line: number; endLine?: number } => {
+  const safeStart = clampIndex(startIndex, content.length);
+  const safeEnd = clampIndex(endIndex ?? safeStart, content.length);
+  const normalizedEnd = Math.max(safeStart, safeEnd);
+  const endForLine = Math.max(safeStart, normalizedEnd > safeStart ? normalizedEnd - 1 : normalizedEnd);
+
+  const line = countNewlinesBefore(newlineIndexes, safeStart) + 1;
+  const endLine = countNewlinesBefore(newlineIndexes, endForLine) + 1;
+
+  return endLine > line ? { line, endLine } : { line };
+};
+
+const lineStartOffset = (newlineIndexes: number[], lineNumber: number) =>
+  lineNumber <= 1 ? 0 : (newlineIndexes[lineNumber - 2] ?? -1) + 1;
+
+const lineEndOffset = (content: string, newlineIndexes: number[], lineNumber: number) =>
+  newlineIndexes[lineNumber - 1] ?? content.length;
+
+export const getSnippetByIndex = (
+  content: string,
+  startIndex: number,
+  endIndex?: number,
+  contextLines: number = 1,
+  newlineIndexes: number[] = buildNewlineIndex(content),
+): { snippet: string; snippetStartLine: number; snippetEndLine: number } => {
+  const lineInfo = getLineInfo(content, startIndex, endIndex, newlineIndexes);
+  const targetEndLine = lineInfo.endLine ?? lineInfo.line;
+  const maxLine = newlineIndexes.length + 1;
+
+  const snippetStartLine = Math.max(1, lineInfo.line - contextLines);
+  const snippetEndLine = Math.min(maxLine, targetEndLine + contextLines);
+
+  const snippetLines: string[] = [];
+  for (let current = snippetStartLine; current <= snippetEndLine; current += 1) {
+    const start = lineStartOffset(newlineIndexes, current);
+    const end = lineEndOffset(content, newlineIndexes, current);
+    let value = content.slice(start, end);
+    if (value.endsWith('\r')) {
+      value = value.slice(0, -1);
+    }
+    snippetLines.push(`${String(current).padStart(4, ' ')} | ${value}`);
+  }
+
+  return {
+    snippet: snippetLines.join('\n'),
+    snippetStartLine,
+    snippetEndLine,
+  };
+};
+
+type LineResolver = {
+  resolveFileByPath: (filePath: string) => RepoFile | undefined;
+  getLineInfoForFile: (file: RepoFile, startIndex: number, endIndex?: number) => { line: number; endLine?: number };
+  getSnippetForFile: (file: RepoFile, startIndex: number, endIndex?: number, contextLines?: number) => {
+    snippet: string;
+    snippetStartLine: number;
+    snippetEndLine: number;
+  };
+  clear: () => void;
+};
+
+const normalizeRepoPath = (value: string) => value.replace(/\\/g, '/');
+
+const createLineResolver = (repoFiles: RepoFile[]): LineResolver => {
+  const newlineIndexByPath = new Map<string, number[]>();
+  const fileByPath = new Map<string, RepoFile>();
+
+  for (const file of repoFiles) {
+    fileByPath.set(file.path, file);
+    fileByPath.set(normalizeRepoPath(file.path), file);
+  }
+
+  const getNewlineIndex = (file: RepoFile) => {
+    const cached = newlineIndexByPath.get(file.path);
+    if (cached) {
+      return cached;
+    }
+    const built = buildNewlineIndex(file.content);
+    newlineIndexByPath.set(file.path, built);
+    return built;
+  };
+
+  return {
+    resolveFileByPath: (filePath: string) =>
+      fileByPath.get(filePath) ?? fileByPath.get(normalizeRepoPath(filePath)),
+    getLineInfoForFile: (file: RepoFile, startIndex: number, endIndex?: number) =>
+      getLineInfo(file.content, startIndex, endIndex, getNewlineIndex(file)),
+    getSnippetForFile: (file: RepoFile, startIndex: number, endIndex?: number, contextLines: number = 1) =>
+      getSnippetByIndex(file.content, startIndex, endIndex, contextLines, getNewlineIndex(file)),
+    clear: () => {
+      newlineIndexByPath.clear();
+      fileByPath.clear();
+    },
+  };
+};
+
+const createFindingFromIndex = (
+  lineResolver: LineResolver,
   file: RepoFile,
-  line: number,
+  startIndex: number,
+  endIndex: number,
   reason: string,
   details: string,
   recommendation: string,
-): Finding => ({
-  path: file.path,
-  line,
-  reason,
-  details,
-  recommendation,
-  codeSnippet: formatCodeSnippet(file.lines, line),
-});
+): Finding => {
+  const lineInfo = lineResolver.getLineInfoForFile(file, startIndex, endIndex);
+  const snippet = lineResolver.getSnippetForFile(file, startIndex, endIndex, 1);
+
+  return {
+    path: file.path,
+    line: lineInfo.line,
+    endLine: lineInfo.endLine,
+    reason,
+    details,
+    recommendation,
+    codeSnippet: snippet.snippet,
+  };
+};
 
 const toRefs = (findings: Finding[]) =>
-  findings.slice(0, 20).map((finding) => ({ path: finding.path, line: finding.line }));
+  findings.slice(0, 20).map((finding) => ({ path: finding.path, line: finding.line, endLine: finding.endLine }));
+
+const firstMatchRange = (content: string, pattern: RegExp): { start: number; end: number; evidence: string } | null => {
+  const flags = pattern.flags.replaceAll('g', '');
+  const executable = new RegExp(pattern.source, flags);
+  const match = executable.exec(content);
+  if (!match || match.index === undefined) {
+    return null;
+  }
+  const evidence = match[0] ?? '';
+  return {
+    start: match.index,
+    end: match.index + evidence.length,
+    evidence,
+  };
+};
 
 const normalizeSeverity = (value: string): ReviewSeverity => {
   const upper = value.toUpperCase();
@@ -400,10 +554,62 @@ const parseJsonObject = (raw: string): unknown => {
   }
 };
 
+type OpenAiFinding = z.infer<typeof aiFindingSchema>;
+export type EvidenceCandidate = Pick<OpenAiFinding, 'path' | 'evidence'>;
+
+const resolveOpenAiEvidenceRefs = (
+  lineResolver: LineResolver,
+  findings: OpenAiFinding[],
+): { refs: Array<{ path: string; line?: number; endLine?: number }>; verifiedCount: number; unverifiedCount: number } => {
+  const refs: Array<{ path: string; line?: number; endLine?: number }> = [];
+  let verifiedCount = 0;
+  let unverifiedCount = 0;
+
+  for (const finding of findings.slice(0, OPENAI_MAX_FINDINGS)) {
+    const file = lineResolver.resolveFileByPath(finding.path);
+    if (!file) {
+      refs.push({ path: normalizeRepoPath(finding.path) });
+      unverifiedCount += 1;
+      continue;
+    }
+
+    const evidence = finding.evidence.slice(0, OPENAI_MAX_EVIDENCE_CHARS);
+    const startIndex = file.content.indexOf(evidence);
+    if (startIndex < 0) {
+      refs.push({ path: file.path });
+      unverifiedCount += 1;
+      continue;
+    }
+
+    const lineInfo = lineResolver.getLineInfoForFile(file, startIndex, startIndex + evidence.length);
+    refs.push({
+      path: file.path,
+      line: lineInfo.line,
+      endLine: lineInfo.endLine,
+    });
+    verifiedCount += 1;
+  }
+
+  return { refs, verifiedCount, unverifiedCount };
+};
+
+export const resolveEvidenceRefs = (
+  repoFiles: RepoFile[],
+  findings: EvidenceCandidate[],
+): { refs: Array<{ path: string; line?: number; endLine?: number }>; verifiedCount: number; unverifiedCount: number } => {
+  const lineResolver = createLineResolver(repoFiles);
+  try {
+    return resolveOpenAiEvidenceRefs(lineResolver, findings);
+  } finally {
+    lineResolver.clear();
+  }
+};
+
 const answerWithCodex = async (
   jobId: string,
   question: (typeof reviewQuestions)[number],
   repoContext: string,
+  lineResolver: LineResolver,
 ): Promise<ReviewAnswer> => {
   if (!openai) {
     throw new Error('OPENAI_API_KEY_MISSING');
@@ -412,10 +618,12 @@ const answerWithCodex = async (
   const prompt = [
     'You are a senior application security and architecture reviewer.',
     'Analyze the provided repository snippets and answer exactly in JSON format:',
-    '{"severity":"CRITICAL|HIGH|MEDIUM|LOW|INFO|UNKNOWN","answer":"string","refs":[{"path":"string","line":number}]}.',
+    '{"severity":"CRITICAL|HIGH|MEDIUM|LOW|INFO|UNKNOWN","answer":"string","findings":[{"path":"relative/path","evidence":"exact code substring <= 200 chars","severity":"optional","explanation":"optional"}]}.',
     'Rules:',
     '- Keep answer focused on concrete findings.',
-    '- Use refs for specific files/lines when available.',
+    `- Return at most ${OPENAI_MAX_FINDINGS} findings.`,
+    `- Evidence must be copied exactly from code and be <= ${OPENAI_MAX_EVIDENCE_CHARS} chars.`,
+    '- Do not guess line numbers; local system will verify refs.',
     '- If insufficient evidence, set severity to INFO or UNKNOWN and explain what is missing.',
     '',
     `Question ID: ${question.id}`,
@@ -437,6 +645,7 @@ const answerWithCodex = async (
   }
 
   const parsed = aiAnswerSchema.parse(parseJsonObject(outputText));
+  const resolved = resolveOpenAiEvidenceRefs(lineResolver, parsed.findings);
 
   logger.info(
     {
@@ -445,7 +654,9 @@ const answerWithCodex = async (
       questionId: question.id,
       provider: 'codex',
       model: REVIEW_MODEL,
-      refsCount: parsed.refs.length,
+      refsCount: resolved.refs.length,
+      verifiedRefCount: resolved.verifiedCount,
+      unverifiedRefCount: resolved.unverifiedCount,
     },
     'Codex response parsed successfully',
   );
@@ -456,14 +667,17 @@ const answerWithCodex = async (
     category: question.category,
     severity: normalizeSeverity(parsed.severity),
     answer: parsed.answer,
-    refs: parsed.refs.slice(0, 20),
+    refs: resolved.refs.slice(0, 20),
   };
 };
 
 const summarizeNoIssues = (repoFiles: RepoFile[], justification: string) =>
   `Inspected ${repoFiles.length} readable files. ${justification}`;
 
-const assessSqlInjection = (repoFiles: RepoFile[]): { severity: ReviewSeverity; findings: Finding[]; answer: string } => {
+const assessSqlInjection = (
+  repoFiles: RepoFile[],
+  lineResolver: LineResolver,
+): { severity: ReviewSeverity; findings: Finding[]; answer: string } => {
   const findings: Finding[] = [];
   const patterns: Array<{ regex: RegExp; reason: string; details: string; recommendation: string }> = [
     {
@@ -494,18 +708,21 @@ const assessSqlInjection = (repoFiles: RepoFile[]): { severity: ReviewSeverity; 
 
   for (const file of repoFiles) {
     for (const pattern of patterns) {
-      if (!pattern.regex.test(file.content)) {
+      const match = firstMatchRange(file.content, pattern.regex);
+      if (!match) {
         continue;
       }
-      const line = findLine(file.lines, (lineContent) => pattern.regex.test(lineContent));
-      findings.push({
-        path: file.path,
-        line,
-        reason: pattern.reason,
-        details: pattern.details,
-        recommendation: pattern.recommendation,
-        codeSnippet: formatCodeSnippet(file.lines, line),
-      });
+      findings.push(
+        createFindingFromIndex(
+          lineResolver,
+          file,
+          match.start,
+          match.end,
+          pattern.reason,
+          pattern.details,
+          pattern.recommendation,
+        ),
+      );
     }
   }
 
@@ -530,7 +747,10 @@ const assessSqlInjection = (repoFiles: RepoFile[]): { severity: ReviewSeverity; 
   };
 };
 
-const assessXss = (repoFiles: RepoFile[]): { severity: ReviewSeverity; findings: Finding[]; answer: string } => {
+const assessXss = (
+  repoFiles: RepoFile[],
+  lineResolver: LineResolver,
+): { severity: ReviewSeverity; findings: Finding[]; answer: string } => {
   const findings: Finding[] = [];
   const patterns: Array<{ regex: RegExp; reason: string; details: string; recommendation: string }> = [
     {
@@ -561,18 +781,21 @@ const assessXss = (repoFiles: RepoFile[]): { severity: ReviewSeverity; findings:
 
   for (const file of repoFiles) {
     for (const pattern of patterns) {
-      if (!pattern.regex.test(file.content)) {
+      const match = firstMatchRange(file.content, pattern.regex);
+      if (!match) {
         continue;
       }
-      const line = findLine(file.lines, (lineContent) => pattern.regex.test(lineContent));
-      findings.push({
-        path: file.path,
-        line,
-        reason: pattern.reason,
-        details: pattern.details,
-        recommendation: pattern.recommendation,
-        codeSnippet: formatCodeSnippet(file.lines, line),
-      });
+      findings.push(
+        createFindingFromIndex(
+          lineResolver,
+          file,
+          match.start,
+          match.end,
+          pattern.reason,
+          pattern.details,
+          pattern.recommendation,
+        ),
+      );
     }
   }
 
@@ -597,28 +820,34 @@ const assessXss = (repoFiles: RepoFile[]): { severity: ReviewSeverity; findings:
   };
 };
 
-const assessAuthz = (repoFiles: RepoFile[]): { severity: ReviewSeverity; findings: Finding[]; answer: string } => {
+const assessAuthz = (
+  repoFiles: RepoFile[],
+  lineResolver: LineResolver,
+): { severity: ReviewSeverity; findings: Finding[]; answer: string } => {
   const findings: Finding[] = [];
   const routePattern = /(app|router)\.(get|post|put|patch|delete)\s*\(/i;
   const authPattern = /(auth|jwt|passport|requireAuth|authorize|rbac)/i;
 
   for (const file of repoFiles) {
-    if (!routePattern.test(file.content)) {
+    const routeMatch = firstMatchRange(file.content, routePattern);
+    if (!routeMatch) {
       continue;
     }
     const hasAuthMarker = authPattern.test(file.content);
     if (hasAuthMarker) {
       continue;
     }
-    findings.push({
-      ...createFinding(
+    findings.push(
+      createFindingFromIndex(
+        lineResolver,
         file,
-        findLine(file.lines, (line) => routePattern.test(line)),
+        routeMatch.start,
+        routeMatch.end,
         'Route handlers found without visible auth/authz middleware markers in same file',
         'This route file defines request handlers but no obvious authentication/authorization checks are present nearby.',
         'Add explicit auth middleware and role/ownership checks on sensitive endpoints.',
       ),
-    });
+    );
   }
 
   if (findings.length === 0) {
@@ -642,7 +871,10 @@ const assessAuthz = (repoFiles: RepoFile[]): { severity: ReviewSeverity; finding
   };
 };
 
-const assessSecrets = (repoFiles: RepoFile[]): { severity: ReviewSeverity; findings: Finding[]; answer: string } => {
+const assessSecrets = (
+  repoFiles: RepoFile[],
+  lineResolver: LineResolver,
+): { severity: ReviewSeverity; findings: Finding[]; answer: string } => {
   const findings: Finding[] = [];
   const patterns: Array<{ regex: RegExp; reason: string; details: string; recommendation: string }> = [
     {
@@ -665,18 +897,21 @@ const assessSecrets = (repoFiles: RepoFile[]): { severity: ReviewSeverity; findi
 
   for (const file of repoFiles) {
     for (const pattern of patterns) {
-      if (!pattern.regex.test(file.content)) {
+      const match = firstMatchRange(file.content, pattern.regex);
+      if (!match) {
         continue;
       }
-      const line = findLine(file.lines, (lineContent) => pattern.regex.test(lineContent));
-      findings.push({
-        path: file.path,
-        line,
-        reason: pattern.reason,
-        details: pattern.details,
-        recommendation: pattern.recommendation,
-        codeSnippet: formatCodeSnippet(file.lines, line),
-      });
+      findings.push(
+        createFindingFromIndex(
+          lineResolver,
+          file,
+          match.start,
+          match.end,
+          pattern.reason,
+          pattern.details,
+          pattern.recommendation,
+        ),
+      );
     }
   }
 
@@ -731,6 +966,7 @@ const parseDependencyNames = (repoFiles: RepoFile[]) => {
 
 const assessDependencies = (
   repoFiles: RepoFile[],
+  lineResolver: LineResolver,
 ): { severity: ReviewSeverity; findings: Finding[]; answer: string } => {
   const findings: Finding[] = [];
   const riskyPackages = new Set(['event-stream', 'node-serialize', 'request']);
@@ -741,32 +977,41 @@ const assessDependencies = (
       continue;
     }
     const file = repoFiles.find((item) => item.path.endsWith('package.json'));
-    const line = file ? findLine(file.lines, (lineText) => lineText.includes(`"${packageName}"`)) : 1;
+    const fileContent = file?.content ?? '';
+    const evidence = `"${packageName}"`;
+    const startIndex = file ? Math.max(0, fileContent.indexOf(evidence)) : 0;
+    const endIndex = startIndex + evidence.length;
     findings.push({
       path: file?.path ?? 'package.json',
-      line,
+      line: file ? lineResolver.getLineInfoForFile(file, startIndex, endIndex).line : 1,
       reason: `Dependency ${packageName} is considered high-risk/deprecated`,
       details:
         'The dependency appears on a high-risk/deprecated watchlist and may introduce known security or maintenance risks.',
       recommendation:
         'Replace with a maintained alternative and run dependency vulnerability scanning as part of CI.',
-      codeSnippet: file ? formatCodeSnippet(file.lines, line) : '   1 | package.json not found in scanned files',
+      codeSnippet: file
+        ? lineResolver.getSnippetForFile(file, startIndex, endIndex).snippet
+        : '   1 | package.json not found in scanned files',
     });
   }
 
   for (const item of nonPinned) {
     const packageName = item.split('@')[0] ?? item;
     const file = repoFiles.find((repoFile) => repoFile.path.endsWith('package.json'));
-    const line = file ? findLine(file.lines, (lineText) => lineText.includes(packageName)) : 1;
+    const fileContent = file?.content ?? '';
+    const startIndex = file ? Math.max(0, fileContent.indexOf(packageName)) : 0;
+    const endIndex = startIndex + packageName.length;
     findings.push({
       path: file?.path ?? 'package.json',
-      line,
+      line: file ? lineResolver.getLineInfoForFile(file, startIndex, endIndex).line : 1,
       reason: `Dependency version is non-pinned (${item})`,
       details:
         'Using wildcard/latest versions can pull unreviewed releases and make builds non-reproducible.',
       recommendation:
         'Pin exact or constrained versions and use lockfile verification in CI.',
-      codeSnippet: file ? formatCodeSnippet(file.lines, line) : '   1 | package.json not found in scanned files',
+      codeSnippet: file
+        ? lineResolver.getSnippetForFile(file, startIndex, endIndex).snippet
+        : '   1 | package.json not found in scanned files',
     });
   }
 
@@ -822,18 +1067,19 @@ const answerWithRules = (
   question: (typeof reviewQuestions)[number],
   repoFiles: RepoFile[],
   answers: ReviewAnswer[],
+  lineResolver: LineResolver,
 ): ReviewAnswer => {
   const assessment: RuleAssessment =
     question.id === 'security-sql-injection'
-      ? assessSqlInjection(repoFiles)
+      ? assessSqlInjection(repoFiles, lineResolver)
       : question.id === 'security-xss'
-        ? assessXss(repoFiles)
+        ? assessXss(repoFiles, lineResolver)
         : question.id === 'security-authz'
-          ? assessAuthz(repoFiles)
+          ? assessAuthz(repoFiles, lineResolver)
           : question.id === 'security-secrets'
-            ? assessSecrets(repoFiles)
+            ? assessSecrets(repoFiles, lineResolver)
             : question.id === 'security-dependency-vulns'
-              ? assessDependencies(repoFiles)
+              ? assessDependencies(repoFiles, lineResolver)
               : summarizeReview(repoFiles, answers);
 
   return {
@@ -886,6 +1132,7 @@ export const runReviewForJob = async (jobId: string, repoRoot: string): Promise<
       throw new Error('NO_READABLE_FILES');
     }
     const repoContext = buildRepoContext(repoFiles);
+    const lineResolver = createLineResolver(repoFiles);
 
     logger.info(
       {
@@ -900,35 +1147,38 @@ export const runReviewForJob = async (jobId: string, repoRoot: string): Promise<
       },
       'Loaded real repository files for analysis',
     );
+    try {
+      for (const question of reviewQuestions) {
+        try {
+          logger.info(
+            { jobId, stage: 'REVIEWING', questionId: question.id },
+            'Starting question analysis',
+          );
 
-    for (const question of reviewQuestions) {
-      try {
-        logger.info(
-          { jobId, stage: 'REVIEWING', questionId: question.id },
-          'Starting question analysis',
-        );
+          const answer = REVIEW_USE_CODEX
+            ? await answerWithCodex(jobId, question, repoContext, lineResolver)
+            : answerWithRules(question, repoFiles, answers, lineResolver);
 
-        const answer = REVIEW_USE_CODEX
-          ? await answerWithCodex(jobId, question, repoContext)
-          : answerWithRules(question, repoFiles, answers);
-
-        answers.push(answer);
-        logger.info(
-          {
-            jobId,
-            stage: 'REVIEWING',
-            questionId: question.id,
-            severity: answer.severity,
-            findingCount: answer.refs.length,
-          },
-          'Completed question analysis',
-        );
-      } catch (error) {
-        const partialError = new Error('REVIEW_QUESTION_FAILED');
-        (partialError as Error & { partialResults?: ReviewAnswer[] }).partialResults = answers;
-        logger.error({ error, jobId, questionId: question.id }, 'Question review failed');
-        throw partialError;
+          answers.push(answer);
+          logger.info(
+            {
+              jobId,
+              stage: 'REVIEWING',
+              questionId: question.id,
+              severity: answer.severity,
+              findingCount: answer.refs.length,
+            },
+            'Completed question analysis',
+          );
+        } catch (error) {
+          const partialError = new Error('REVIEW_QUESTION_FAILED');
+          (partialError as Error & { partialResults?: ReviewAnswer[] }).partialResults = answers;
+          logger.error({ error, jobId, questionId: question.id }, 'Question review failed');
+          throw partialError;
+        }
       }
+    } finally {
+      lineResolver.clear();
     }
   };
 
