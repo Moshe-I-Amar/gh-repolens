@@ -67,6 +67,32 @@ const readableExtensions = new Set([
   '.css',
   '.scss',
 ]);
+const exactSpecialFilenames = new Set([
+  'Dockerfile',
+  'docker-compose.yml',
+  'docker-compose.yaml',
+  'Makefile',
+  'README',
+  'README.md',
+  'README.txt',
+  '.env.example',
+  'package.json',
+  'pnpm-lock.yaml',
+  'yarn.lock',
+  'package-lock.json',
+  'tsconfig.json',
+  'pyproject.toml',
+  'requirements.txt',
+  'go.mod',
+  'go.sum',
+  'pom.xml',
+  'build.gradle',
+  'settings.gradle',
+  'eslint.config',
+  '.eslintrc',
+  '.prettierrc',
+]);
+const specialFilenamePrefixes = ['eslint.config.', '.eslintrc.', '.prettierrc.'];
 const normalizedSeverities: ReviewSeverity[] = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO', 'UNKNOWN'];
 const aiAnswerSchema = z.object({
   severity: z.string().min(1),
@@ -116,6 +142,26 @@ const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number, label: str
 
 const isText = (content: string) => !content.includes('\u0000');
 
+const isAllowedFile = (relativePath: string, filename: string, extension: string) => {
+  if (readableExtensions.has(extension)) {
+    return true;
+  }
+
+  if (exactSpecialFilenames.has(filename)) {
+    return true;
+  }
+
+  if (specialFilenamePrefixes.some((prefix) => filename.startsWith(prefix))) {
+    return true;
+  }
+
+  if (relativePath === 'README') {
+    return true;
+  }
+
+  return false;
+};
+
 const sortDirEntries = (entries: Dirent[]) =>
   entries.slice().sort((a, b) => a.name.localeCompare(b.name));
 
@@ -138,7 +184,8 @@ export const scanRepoFiles = async (
     }
     const filename = path.basename(absolutePath);
     const extension = path.extname(filename).toLowerCase();
-    if (!readableExtensions.has(extension) && filename !== 'README') {
+    const relativePath = path.relative(repoRoot, absolutePath);
+    if (!isAllowedFile(relativePath, filename, extension)) {
       return;
     }
     try {
@@ -151,7 +198,7 @@ export const scanRepoFiles = async (
         return;
       }
       files.push({
-        path: path.relative(repoRoot, absolutePath),
+        path: relativePath,
         content,
         lines: content.split(/\r?\n/),
       });
