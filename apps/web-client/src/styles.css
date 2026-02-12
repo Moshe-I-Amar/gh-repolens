@@ -124,6 +124,7 @@ header p {
 .jobs {
   display: grid;
   gap: 12px;
+  min-width: 0;
 }
 
 .job-card {
@@ -196,6 +197,12 @@ header p {
   margin-top: 12px;
   color: var(--muted);
   white-space: pre-wrap;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.answer p {
+  overflow-wrap: anywhere;
 }
 
 .finding {
@@ -204,6 +211,7 @@ header p {
   border-radius: 10px;
   background: #fff;
   padding: 10px;
+  min-width: 0;
 }
 
 .finding-title {
@@ -227,6 +235,8 @@ header p {
   color: #2b2b2f;
   font-size: 12px;
   line-height: 1.4;
+  max-width: 100%;
+  white-space: pre;
 }
 
 .accordion {
@@ -234,6 +244,7 @@ header p {
   border-radius: 14px;
   padding: 12px;
   background: #fffdf9;
+  min-width: 0;
 }
 
 .accordion button {
