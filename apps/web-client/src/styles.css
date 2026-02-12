@@ -146,6 +146,11 @@ header p {
   color: var(--muted);
 }
 
+.job-card.failed {
+  border-color: #d84c3f;
+  background: #fff2ef;
+}
+
 .pagination {
   display: flex;
   align-items: center;
@@ -249,6 +254,13 @@ header p {
   font-size: 12px;
 }
 
+.ref-list {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: #4b4b50;
+  font-size: 13px;
+}
+
 .detail-header {
   display: flex;
   align-items: flex-start;
@@ -271,6 +283,70 @@ header p {
   font-size: 14px;
 }
 
+.error-text {
+  color: #9f2e25;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.health-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.health-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  background: #fff;
+  display: grid;
+  gap: 4px;
+}
+
+.health-card.ok {
+  border-color: #1f8a5b;
+  background: #f2fcf7;
+}
+
+.health-card.bad {
+  border-color: #d84c3f;
+  background: #fff3f0;
+}
+
+.health-card strong {
+  font-size: 14px;
+}
+
+.health-card span {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.health-card code {
+  font-size: 11px;
+  color: #4b4b50;
+}
+
+.risk-box {
+  margin-top: 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #f8f6f1;
+  padding: 8px 10px;
+  display: grid;
+  gap: 4px;
+}
+
+.risk-box strong {
+  font-size: 13px;
+}
+
+.risk-box span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 @media (max-width: 900px) {
   header,
   .hero,
@@ -283,6 +359,10 @@ header p {
   }
 
   .hero form {
+    grid-template-columns: 1fr;
+  }
+
+  .health-grid {
     grid-template-columns: 1fr;
   }
 }
