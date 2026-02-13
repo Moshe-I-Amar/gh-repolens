@@ -596,6 +596,9 @@ export default function App() {
       const a = document.createElement('a');
       a.href = url;
       a.download = filename;
+      // Avoid inheriting any global/default target behavior that could open a new tab.
+      a.target = '_self';
+      a.rel = 'noopener noreferrer';
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -841,7 +844,13 @@ export default function App() {
                       {isExporting ? 'Generating PDF...' : 'Export PDF Report'}
                     </button>
                     {exportDownload && (
-                      <a className="export-link" href={exportDownload.url} download={exportDownload.filename}>
+                      <a
+                        className="export-link"
+                        href={exportDownload.url}
+                        download={exportDownload.filename}
+                        target="_self"
+                        rel="noopener noreferrer"
+                      >
                         If download did not start, click to download
                       </a>
                     )}
