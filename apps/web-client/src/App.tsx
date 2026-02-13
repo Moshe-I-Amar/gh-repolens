@@ -342,6 +342,7 @@ export default function App() {
   const [exportDownload, setExportDownload] = useState<{ url: string; filename: string } | null>(
     null,
   );
+  const [exportDebug, setExportDebug] = useState<string[]>([]);
   const [inProgressPage, setInProgressPage] = useState(1);
   const [completedPage, setCompletedPage] = useState(1);
   const [failedPage, setFailedPage] = useState(1);
@@ -391,6 +392,11 @@ export default function App() {
     };
   }, [exportDownload?.url]);
 
+  const pushExportDebug = (message: string) => {
+    const stamp = new Date().toISOString();
+    setExportDebug((prev) => [`${stamp} ${message}`, ...prev].slice(0, 30));
+  };
+
   const submitJob = async (event: React.FormEvent) => {
     event.preventDefault();
     setSubmitting(true);
@@ -436,12 +442,22 @@ export default function App() {
 
   const exportReportAsPdf = async () => {
     if (!selectedJob || !selectedJob.reviewResults || selectedJob.status !== 'COMPLETED') {
+      pushExportDebug('export aborted: no completed job selected');
       return;
     }
 
     setFormError(null);
     setExportDownload(null);
     setIsExporting(true);
+    pushExportDebug(
+      `export start: jobId=${selectedJob._id} questions=${selectedJob.reviewResults.questions.length}`,
+    );
+    console.groupCollapsed(`[Export PDF] ${selectedJob._id}`);
+    console.debug('start', {
+      jobId: selectedJob._id,
+      status: selectedJob.status,
+      questionCount: selectedJob.reviewResults.questions.length,
+    });
 
     const truncate = (value: string, maxLen: number) =>
       value.length > maxLen ? `${value.slice(0, Math.max(0, maxLen - 1))}…` : value;
@@ -586,12 +602,17 @@ export default function App() {
       const pdfBytes = await pdfDoc.save();
       // Ensure a DOM-friendly buffer type for Blob construction across TS lib variants.
       const pdfUint8 = new Uint8Array(pdfBytes);
+      pushExportDebug(`pdf bytes: ${pdfUint8.byteLength}`);
+      console.debug('pdf bytes', pdfUint8.byteLength);
       const blob = new Blob([pdfUint8], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
+      pushExportDebug(`blob url: ${url}`);
+      console.debug('blob url', url);
 
       const safeId = selectedJob._id.replaceAll(/[^A-Za-z0-9_-]/g, '_');
       const filename = `repolens-report-${safeId}.pdf`;
       setExportDownload({ url, filename });
+      pushExportDebug(`download filename: ${filename}`);
 
       const a = document.createElement('a');
       a.href = url;
@@ -600,12 +621,18 @@ export default function App() {
       a.target = '_self';
       a.rel = 'noopener noreferrer';
       document.body.appendChild(a);
+      pushExportDebug('triggering a.click()');
+      console.debug('a.click()', { href: a.href, download: a.download, target: a.target });
       a.click();
       a.remove();
+      pushExportDebug('a.click() done');
     } catch (err) {
+      console.error('export failed', err);
       setFormError(err instanceof Error ? err.message : 'Failed to export PDF');
+      pushExportDebug(`export failed: ${err instanceof Error ? err.message : 'unknown error'}`);
     } finally {
       setIsExporting(false);
+      console.groupEnd();
     }
   };
 
@@ -833,7 +860,11 @@ export default function App() {
                     <button
                       type="button"
                       className="export-btn"
-                      onClick={exportReportAsPdf}
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        void exportReportAsPdf();
+                      }}
                       disabled={!canExportReport || isExporting}
                       title={
                         canExportReport
@@ -853,6 +884,14 @@ export default function App() {
                       >
                         If download did not start, click to download
                       </a>
+                    )}
+                    {exportDebug.length > 0 && (
+                      <details>
+                        <summary>Export debug</summary>
+                        <pre style={{ maxWidth: 480, whiteSpace: 'pre-wrap' }}>
+                          {exportDebug.join('\n')}
+                        </pre>
+                      </details>
                     )}
                     <button type="button" onClick={() => setSelectedJobId(null)}>
                       Close
