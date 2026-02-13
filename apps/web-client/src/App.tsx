@@ -338,6 +338,10 @@ export default function App() {
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [formError, setFormError] = useState<string | null>(null);
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportDownload, setExportDownload] = useState<{ url: string; filename: string } | null>(
+    null,
+  );
   const [inProgressPage, setInProgressPage] = useState(1);
   const [completedPage, setCompletedPage] = useState(1);
   const [failedPage, setFailedPage] = useState(1);
@@ -377,6 +381,15 @@ export default function App() {
       setFailedPage(failedPages);
     }
   }, [failedPage, failedPages]);
+
+  useEffect(() => {
+    // Revoke the previous blob URL when a new one is generated (or when unmounting).
+    return () => {
+      if (exportDownload?.url) {
+        URL.revokeObjectURL(exportDownload.url);
+      }
+    };
+  }, [exportDownload?.url]);
 
   const submitJob = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -427,6 +440,8 @@ export default function App() {
     }
 
     setFormError(null);
+    setExportDownload(null);
+    setIsExporting(true);
 
     const truncate = (value: string, maxLen: number) =>
       value.length > maxLen ? `${value.slice(0, Math.max(0, maxLen - 1))}…` : value;
@@ -575,15 +590,19 @@ export default function App() {
       const url = URL.createObjectURL(blob);
 
       const safeId = selectedJob._id.replaceAll(/[^A-Za-z0-9_-]/g, '_');
+      const filename = `repolens-report-${safeId}.pdf`;
+      setExportDownload({ url, filename });
+
       const a = document.createElement('a');
       a.href = url;
-      a.download = `repolens-report-${safeId}.pdf`;
+      a.download = filename;
       document.body.appendChild(a);
       a.click();
       a.remove();
-      URL.revokeObjectURL(url);
     } catch (err) {
       setFormError(err instanceof Error ? err.message : 'Failed to export PDF');
+    } finally {
+      setIsExporting(false);
     }
   };
 
@@ -812,15 +831,20 @@ export default function App() {
                       type="button"
                       className="export-btn"
                       onClick={exportReportAsPdf}
-                      disabled={!canExportReport}
+                      disabled={!canExportReport || isExporting}
                       title={
                         canExportReport
                           ? 'Export review report as PDF'
                           : 'Available after review is completed'
                       }
                     >
-                      Export PDF Report
+                      {isExporting ? 'Generating PDF...' : 'Export PDF Report'}
                     </button>
+                    {exportDownload && (
+                      <a className="export-link" href={exportDownload.url} download={exportDownload.filename}>
+                        If download did not start, click to download
+                      </a>
+                    )}
                     <button type="button" onClick={() => setSelectedJobId(null)}>
                       Close
                     </button>
