@@ -40,6 +40,7 @@ services:
     environment:
       MONGODB_URI: ${MONGODB_URI:-mongodb://host.docker.internal:27017/repoLens}
       RABBITMQ_URL: amqp://repolens:repolens2411@rabbitmq:5672
+      HEALTH_PORT: '3002'
       WORKSPACES_ROOT: /workspaces
       ZIP_SIZE_LIMIT_MB: '200'
       ZIP_FILE_COUNT_LIMIT: '50000'
@@ -48,6 +49,8 @@ services:
       LOG_LEVEL: info
       START_RETRY_DELAY_MS: '5000'
     restart: unless-stopped
+    ports:
+      - '3002:3002'
     volumes:
       - workspaces-data:/workspaces
     extra_hosts:
@@ -63,6 +66,7 @@ services:
     environment:
       MONGODB_URI: ${MONGODB_URI:-mongodb://host.docker.internal:27017/repoLens}
       RABBITMQ_URL: amqp://repolens:repolens2411@rabbitmq:5672
+      HEALTH_PORT: '3003'
       WORKSPACES_ROOT: /workspaces
       REVIEW_TIMEOUT_MS: '600000'
       REVIEW_USE_CODEX: ${REVIEW_USE_CODEX:-true}
@@ -73,6 +77,8 @@ services:
       LOG_LEVEL: info
       START_RETRY_DELAY_MS: '5000'
     restart: unless-stopped
+    ports:
+      - '3003:3003'
     volumes:
       - workspaces-data:/workspaces
     extra_hosts:
