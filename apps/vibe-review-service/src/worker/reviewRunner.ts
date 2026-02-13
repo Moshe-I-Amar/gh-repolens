@@ -6,6 +6,7 @@ import { createLogger } from '@repolens/shared-utils';
 import { z } from 'zod';
 import {
   ReviewAnswer,
+  ReviewFinding,
   ReviewResults,
   ReviewSeverity,
 } from '@repolens/shared-types';
@@ -568,8 +569,14 @@ export type EvidenceCandidate = Pick<OpenAiFinding, 'path' | 'evidence'>;
 const resolveOpenAiEvidenceRefs = (
   lineResolver: LineResolver,
   findings: OpenAiFinding[],
-): { refs: Array<{ path: string; line?: number; endLine?: number }>; verifiedCount: number; unverifiedCount: number } => {
+): {
+  refs: Array<{ path: string; line?: number; endLine?: number }>;
+  verifiedFindings: ReviewFinding[];
+  verifiedCount: number;
+  unverifiedCount: number;
+} => {
   const refs: Array<{ path: string; line?: number; endLine?: number }> = [];
+  const verifiedFindings: ReviewFinding[] = [];
   let verifiedCount = 0;
   let unverifiedCount = 0;
 
@@ -590,15 +597,26 @@ const resolveOpenAiEvidenceRefs = (
     }
 
     const lineInfo = lineResolver.getLineInfoForFile(file, startIndex, startIndex + evidence.length);
+    const snippet = lineResolver.getSnippetForFile(file, startIndex, startIndex + evidence.length, 2);
+
     refs.push({
       path: file.path,
       line: lineInfo.line,
       endLine: lineInfo.endLine,
     });
+
+    verifiedFindings.push({
+      path: file.path,
+      line: lineInfo.line,
+      reason: finding.severity ? `OpenAI finding (${finding.severity})` : 'OpenAI finding',
+      details: finding.explanation ?? 'Evidence returned by OpenAI and verified in repository source.',
+      recommendation: 'Review and remediate as appropriate; see verified snippet.',
+      codeSnippet: snippet.snippet,
+    });
     verifiedCount += 1;
   }
 
-  return { refs, verifiedCount, unverifiedCount };
+  return { refs, verifiedFindings, verifiedCount, unverifiedCount };
 };
 
 export const resolveEvidenceRefs = (
@@ -674,8 +692,9 @@ const answerWithCodex = async (
     title: question.title,
     category: question.category,
     severity: normalizeSeverity(parsed.severity),
-    answer: parsed.answer,
+    answer: `${parsed.answer}\n\nVerified code excerpts are attached in findings.`,
     refs: resolved.refs.slice(0, 20),
+    findings: resolved.verifiedFindings.slice(0, 10),
   };
 };
 
