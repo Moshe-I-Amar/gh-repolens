@@ -1,3 +1,4 @@
+import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { useEffect, useMemo, useState } from 'react';
 
 type JobStatus =
@@ -420,101 +421,170 @@ export default function App() {
       selectedJob.reviewResults.questions.length > 0,
   );
 
-  const exportReportAsPdf = () => {
+  const exportReportAsPdf = async () => {
     if (!selectedJob || !selectedJob.reviewResults || selectedJob.status !== 'COMPLETED') {
       return;
     }
 
-    const riskMarkup = selectedJob.reviewResults.riskSummary
-      ? `<div class="block"><strong>Risk Summary</strong><p>Level: ${escapeHtml(
-          selectedJob.reviewResults.riskSummary.level,
-        )} | Score: ${selectedJob.reviewResults.riskSummary.score}/100</p><p>CRITICAL: ${
-          selectedJob.reviewResults.riskSummary.counts.CRITICAL
-        }, HIGH: ${selectedJob.reviewResults.riskSummary.counts.HIGH}, MEDIUM: ${
-          selectedJob.reviewResults.riskSummary.counts.MEDIUM
-        }, LOW: ${selectedJob.reviewResults.riskSummary.counts.LOW}, INFO: ${
-          selectedJob.reviewResults.riskSummary.counts.INFO
-        }, UNKNOWN: ${selectedJob.reviewResults.riskSummary.counts.UNKNOWN}</p></div>`
-      : '';
+    setFormError(null);
 
-    const questionMarkup = selectedJob.reviewResults.questions
-      .map((question, questionIndex) => {
-        const refs = question.refs.length
-          ? `<ul>${question.refs
-              .map((ref) => `<li>${escapeHtml(formatRef(ref))}</li>`)
-              .join('')}</ul>`
-          : '<p>No references.</p>';
-        const findings = (question.findings ?? []).length
-          ? `<ul>${(question.findings ?? [])
-              .map(
-                (finding) =>
-                  `<li><strong>${escapeHtml(finding.path)}:${finding.line}${
-                    finding.endLine ? `-${finding.endLine}` : ''
-                  }</strong> - ${escapeHtml(finding.reason)}<br/>${escapeHtml(
-                    finding.details,
-                  )}<br/><em>Recommendation:</em> ${escapeHtml(finding.recommendation)}</li>`,
-              )
-              .join('')}</ul>`
-          : '<p>No findings.</p>';
-        return `<section class="question">
-          <h3>${questionIndex + 1}. ${escapeHtml(question.title)}</h3>
-          <p><strong>Category:</strong> ${escapeHtml(question.category)} | <strong>Severity:</strong> ${escapeHtml(
-            question.severity,
-          )}</p>
-          <p>${escapeHtml(question.answer)}</p>
-          <div class="block"><strong>References</strong>${refs}</div>
-          <div class="block"><strong>Findings</strong>${findings}</div>
-        </section>`;
-      })
-      .join('');
+    const truncate = (value: string, maxLen: number) =>
+      value.length > maxLen ? `${value.slice(0, Math.max(0, maxLen - 1))}…` : value;
 
-    const content = `<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <title>RepoLens Review Report</title>
-  <style>
-    body { font-family: Arial, sans-serif; margin: 24px; color: #1b1b1f; line-height: 1.4; }
-    h1 { margin: 0 0 4px; font-size: 22px; }
-    h2 { margin: 18px 0 8px; font-size: 18px; }
-    h3 { margin: 10px 0 6px; font-size: 15px; }
-    p { margin: 6px 0; white-space: pre-wrap; }
-    ul { margin: 6px 0 6px 18px; padding: 0; }
-    li { margin: 4px 0; }
-    .meta { margin-top: 10px; font-size: 13px; color: #333; }
-    .block { border: 1px solid #d6cfc2; border-radius: 8px; padding: 10px; margin: 8px 0; }
-    .question { border-top: 1px solid #ddd; padding-top: 10px; margin-top: 10px; page-break-inside: avoid; }
-  </style>
-</head>
-<body>
-  <h1>RepoLens Review Report</h1>
-  <div class="meta">
-    <p><strong>Repository:</strong> ${escapeHtml(selectedJob.repoUrl)}</p>
-    <p><strong>Job ID:</strong> ${escapeHtml(selectedJob._id)}</p>
-    <p><strong>Status:</strong> ${escapeHtml(statusLabel(selectedJob.status))}</p>
-    <p><strong>Created:</strong> ${escapeHtml(formatDate(selectedJob.createdAt))}</p>
-    <p><strong>Updated:</strong> ${escapeHtml(formatDate(selectedJob.updatedAt))}</p>
-    <p><strong>Review Engine:</strong> ${escapeHtml(
-      reviewEngineLabel(selectedJob.reviewResults.reviewEngine),
-    )}</p>
-  </div>
-  ${riskMarkup}
-  <h2>Questions (${selectedJob.reviewResults.questions.length})</h2>
-  ${questionMarkup}
-</body>
-</html>`;
+    try {
+      const pdfDoc = await PDFDocument.create();
+      const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+      const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
 
-    const printWindow = window.open('', '_blank', 'noopener,noreferrer');
-    if (!printWindow) {
-      setFormError('Popup blocked. Allow popups to export PDF.');
-      return;
+      const pageWidth = 595.28; // A4 portrait
+      const pageHeight = 841.89;
+      const margin = 48;
+      const bodyFontSize = 11;
+      const bodyLineHeight = 14;
+      const maxWidth = pageWidth - margin * 2;
+
+      let page = pdfDoc.addPage([pageWidth, pageHeight]);
+      let cursorY = pageHeight - margin;
+
+      const newPage = () => {
+        page = pdfDoc.addPage([pageWidth, pageHeight]);
+        cursorY = pageHeight - margin;
+      };
+
+      const ensureSpace = (neededHeight: number) => {
+        if (cursorY - neededHeight < margin) {
+          newPage();
+        }
+      };
+
+      const wrapText = (value: string, width: number, usedFont: typeof font, fontSize: number) => {
+        const lines: string[] = [];
+        for (const paragraph of value.split(/\r?\n/)) {
+          const trimmed = paragraph.trimEnd();
+          if (trimmed.length === 0) {
+            lines.push('');
+            continue;
+          }
+          const words = trimmed.split(/\s+/);
+          let line = '';
+          for (const word of words) {
+            const candidate = line ? `${line} ${word}` : word;
+            if (usedFont.widthOfTextAtSize(candidate, fontSize) <= width) {
+              line = candidate;
+              continue;
+            }
+            if (line) {
+              lines.push(line);
+            }
+            line = word;
+          }
+          if (line) {
+            lines.push(line);
+          }
+        }
+        return lines;
+      };
+
+      const drawWrapped = (value: string, opts?: { bold?: boolean; indent?: number; size?: number }) => {
+        const size = opts?.size ?? bodyFontSize;
+        const usedFont = opts?.bold ? fontBold : font;
+        const indent = opts?.indent ?? 0;
+        const availableWidth = maxWidth - indent;
+
+        for (const line of wrapText(value, availableWidth, usedFont, size)) {
+          ensureSpace(bodyLineHeight);
+          page.drawText(line, {
+            x: margin + indent,
+            y: cursorY - size,
+            size,
+            font: usedFont,
+            color: rgb(0, 0, 0),
+          });
+          cursorY -= bodyLineHeight;
+        }
+      };
+
+      const drawSpacer = (height = bodyLineHeight) => {
+        ensureSpace(height);
+        cursorY -= height;
+      };
+
+      drawWrapped('RepoLens Review Report', { bold: true, size: 18 });
+      drawWrapped(`Repository: ${selectedJob.repoUrl}`);
+      drawWrapped(`Job ID: ${selectedJob._id}`);
+      drawWrapped(`Status: ${statusLabel(selectedJob.status)}`);
+      drawWrapped(`Created: ${formatDate(selectedJob.createdAt)}`);
+      drawWrapped(`Updated: ${formatDate(selectedJob.updatedAt)}`);
+      drawWrapped(`Review Engine: ${reviewEngineLabel(selectedJob.reviewResults.reviewEngine)}`);
+      drawWrapped(`Generated: ${new Date().toLocaleString()}`);
+      drawSpacer();
+
+      if (selectedJob.reviewResults.riskSummary) {
+        const risk = selectedJob.reviewResults.riskSummary;
+        drawWrapped('Risk Summary', { bold: true, size: 14 });
+        drawWrapped(`Level: ${risk.level} | Score: ${risk.score}/100`);
+        drawWrapped(
+          `CRITICAL: ${risk.counts.CRITICAL}, HIGH: ${risk.counts.HIGH}, MEDIUM: ${risk.counts.MEDIUM}, LOW: ${risk.counts.LOW}, INFO: ${risk.counts.INFO}, UNKNOWN: ${risk.counts.UNKNOWN}`,
+        );
+        drawSpacer();
+      }
+
+      drawWrapped(`Questions (${selectedJob.reviewResults.questions.length})`, { bold: true, size: 14 });
+      drawSpacer(bodyLineHeight / 2);
+
+      for (const [index, question] of selectedJob.reviewResults.questions.entries()) {
+        drawWrapped(`${index + 1}. ${question.title}`, { bold: true });
+        drawWrapped(`Category: ${question.category} | Severity: ${question.severity}`);
+        drawSpacer(bodyLineHeight / 2);
+
+        if (question.answer.trim().length > 0) {
+          drawWrapped(question.answer);
+          drawSpacer(bodyLineHeight / 2);
+        }
+
+        drawWrapped('References', { bold: true });
+        if (question.refs.length === 0) {
+          drawWrapped('No references.', { indent: 12 });
+        } else {
+          for (const ref of question.refs) {
+            drawWrapped(`- ${formatRef(ref)}`, { indent: 12 });
+          }
+        }
+        drawSpacer(bodyLineHeight / 2);
+
+        drawWrapped('Findings', { bold: true });
+        const findings = question.findings ?? [];
+        if (findings.length === 0) {
+          drawWrapped('No findings.', { indent: 12 });
+        } else {
+          for (const finding of findings) {
+            const location = `${finding.path}:${finding.line}${finding.endLine ? `-${finding.endLine}` : ''}`;
+            drawWrapped(`- ${location} - ${finding.reason}`, { indent: 12 });
+            drawWrapped(`Details: ${truncate(finding.details, 1200)}`, { indent: 24 });
+            drawWrapped(`Recommendation: ${truncate(finding.recommendation, 800)}`, { indent: 24 });
+          }
+        }
+
+        drawSpacer();
+      }
+
+      const pdfBytes = await pdfDoc.save();
+      // Ensure a DOM-friendly buffer type for Blob construction across TS lib variants.
+      const pdfUint8 = new Uint8Array(pdfBytes);
+      const blob = new Blob([pdfUint8], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+
+      const safeId = selectedJob._id.replaceAll(/[^A-Za-z0-9_-]/g, '_');
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `repolens-report-${safeId}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : 'Failed to export PDF');
     }
-
-    printWindow.document.open();
-    printWindow.document.write(content);
-    printWindow.document.close();
-    printWindow.focus();
-    printWindow.print();
   };
 
   return (
