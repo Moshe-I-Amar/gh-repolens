@@ -86,6 +86,10 @@ const serviceDefinitions: Array<{
   { key: 'fetcher', label: 'Repo Fetcher', url: FETCHER_HEALTH_URL },
   { key: 'reviewer', label: 'Vibe Review', url: REVIEWER_HEALTH_URL },
 ];
+const JOBS_POLL_BASE_MS = 5000;
+const JOBS_POLL_MAX_BACKOFF_MS = 60000;
+const DETAILS_POLL_BASE_MS = 6000;
+const DETAILS_POLL_MAX_BACKOFF_MS = 60000;
 
 const statusLabel = (status: JobStatus) =>
   status.toLowerCase().replace(/(^|\s|_)([a-z])/g, (_m, p1, p2) => `${p1}${p2.toUpperCase()}`);
@@ -127,10 +131,12 @@ const validateRepoUrl = (value: string) => {
   return null;
 };
 
-const fetchJobsByStatus = async (status: JobStatus) => {
-  const response = await fetch(`${API_BASE_URL}/jobs?status=${encodeURIComponent(status)}`);
+const fetchJobs = async () => {
+  const response = await fetch(`${API_BASE_URL}/jobs`);
   if (!response.ok) {
-    throw new Error(`Failed to load jobs for status ${status}`);
+    const error = new Error('Failed to load jobs');
+    (error as Error & { status?: number }).status = response.status;
+    throw error;
   }
   return (await response.json()) as Job[];
 };
@@ -145,35 +151,42 @@ const usePollingJobs = () => {
   useEffect(() => {
     let active = true;
     let timer: number | undefined;
+    let nextDelayMs = JOBS_POLL_BASE_MS;
 
-    const fetchJobs = async () => {
+    const runPoll = async () => {
       try {
-        const [queued, fetching, fetched, reviewing, completed, failed] = await Promise.all([
-          fetchJobsByStatus('QUEUED'),
-          fetchJobsByStatus('FETCHING'),
-          fetchJobsByStatus('FETCHED'),
-          fetchJobsByStatus('REVIEWING'),
-          fetchJobsByStatus('COMPLETED'),
-          fetchJobsByStatus('FAILED'),
-        ]);
+        const jobs = await fetchJobs();
+        const inProgress = jobs.filter((job) => inProgressStatuses.includes(job.status));
+        const completed = jobs.filter((job) => job.status === 'COMPLETED');
+        const failed = jobs.filter((job) => job.status === 'FAILED');
         if (active) {
-          setInProgressJobs(sortByUpdatedAtDesc([...queued, ...fetching, ...fetched, ...reviewing]));
+          setInProgressJobs(sortByUpdatedAtDesc(inProgress));
           setCompletedJobs(sortByUpdatedAtDesc(completed));
           setFailedJobs(sortByUpdatedAtDesc(failed));
           setError(null);
           setLoading(false);
         }
+        nextDelayMs = JOBS_POLL_BASE_MS;
       } catch (err) {
+        const status = (err as Error & { status?: number }).status;
         if (active) {
-          setError(err instanceof Error ? err.message : 'Unknown error');
+          if (status === 429) {
+            setError('Rate limited by intake service. Backing off polling automatically.');
+          } else {
+            setError(err instanceof Error ? err.message : 'Unknown error');
+          }
           setLoading(false);
         }
+        nextDelayMs =
+          status === 429
+            ? Math.min(nextDelayMs * 2, JOBS_POLL_MAX_BACKOFF_MS)
+            : Math.min(Math.max(nextDelayMs, 10000), JOBS_POLL_MAX_BACKOFF_MS);
       }
 
-      timer = window.setTimeout(fetchJobs, 2500);
+      timer = window.setTimeout(runPoll, nextDelayMs);
     };
 
-    void fetchJobs();
+    void runPoll();
 
     return () => {
       active = false;
@@ -201,12 +214,15 @@ const useJobDetails = (jobId: string | null) => {
 
     let active = true;
     let timer: number | undefined;
+    let nextDelayMs = DETAILS_POLL_BASE_MS;
 
     const fetchJob = async () => {
       try {
         const response = await fetch(`${API_BASE_URL}/jobs/${encodeURIComponent(jobId)}`);
         if (!response.ok) {
-          throw new Error('Failed to load job details');
+          const error = new Error('Failed to load job details');
+          (error as Error & { status?: number }).status = response.status;
+          throw error;
         }
         const payload = (await response.json()) as Job;
         if (active) {
@@ -214,14 +230,25 @@ const useJobDetails = (jobId: string | null) => {
           setError(null);
           setLoading(false);
         }
+        nextDelayMs = DETAILS_POLL_BASE_MS;
       } catch (err) {
         if (active) {
-          setError(err instanceof Error ? err.message : 'Unknown error');
+          const status = (err as Error & { status?: number }).status;
+          if (status === 429) {
+            setError('Rate limited while loading job details. Retrying with backoff.');
+          } else {
+            setError(err instanceof Error ? err.message : 'Unknown error');
+          }
           setLoading(false);
         }
+        const status = (err as Error & { status?: number }).status;
+        nextDelayMs =
+          status === 429
+            ? Math.min(nextDelayMs * 2, DETAILS_POLL_MAX_BACKOFF_MS)
+            : Math.min(Math.max(nextDelayMs, 12000), DETAILS_POLL_MAX_BACKOFF_MS);
       }
 
-      timer = window.setTimeout(fetchJob, 2500);
+      timer = window.setTimeout(fetchJob, nextDelayMs);
     };
 
     setLoading(true);
