@@ -145,6 +145,14 @@ const openai = OPENAI_API_KEY
       apiKey: OPENAI_API_KEY,
     })
   : null;
+const REVIEW_USE_CODEX_EFFECTIVE = REVIEW_USE_CODEX && Boolean(openai);
+
+if (REVIEW_USE_CODEX && !REVIEW_USE_CODEX_EFFECTIVE) {
+  logger.warn(
+    { stage: 'CONFIG', reviewUseCodex: REVIEW_USE_CODEX },
+    'REVIEW_USE_CODEX is enabled but OPENAI_API_KEY is missing; falling back to RULES engine',
+  );
+}
 
 const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number, label: string) =>
   Promise.race([
@@ -1099,7 +1107,7 @@ export const formatAndStoreResults = async (jobId: string, results: ReviewAnswer
   const existing: ReviewResults = {
     questions: normalizedAnswers,
     riskSummary: calculateRiskSummary(normalizedAnswers),
-    reviewEngine: REVIEW_USE_CODEX ? 'OPENAI' : 'RULES',
+    reviewEngine: REVIEW_USE_CODEX_EFFECTIVE ? 'OPENAI' : 'RULES',
   };
 
   logger.info(
@@ -1122,10 +1130,6 @@ export const runReviewForJob = async (jobId: string, repoRoot: string): Promise<
   const answers: ReviewAnswer[] = [];
 
   const run = async () => {
-    if (REVIEW_USE_CODEX && !openai) {
-      throw new Error('OPENAI_API_KEY_MISSING');
-    }
-
     const scanResult = await scanRepoFiles(repoRoot);
     const repoFiles = scanResult.files;
     if (repoFiles.length === 0) {
@@ -1142,8 +1146,8 @@ export const runReviewForJob = async (jobId: string, repoRoot: string): Promise<
         samplePaths: repoFiles.slice(0, 10).map((file) => file.path),
         priorityPassCount: scanResult.stats.priorityPassCount,
         nonPriorityPassCount: scanResult.stats.nonPriorityPassCount,
-        reviewEngine: REVIEW_USE_CODEX ? 'codex' : 'rules',
-        model: REVIEW_USE_CODEX ? REVIEW_MODEL : undefined,
+        reviewEngine: REVIEW_USE_CODEX_EFFECTIVE ? 'codex' : 'rules',
+        model: REVIEW_USE_CODEX_EFFECTIVE ? REVIEW_MODEL : undefined,
       },
       'Loaded real repository files for analysis',
     );
@@ -1155,7 +1159,7 @@ export const runReviewForJob = async (jobId: string, repoRoot: string): Promise<
             'Starting question analysis',
           );
 
-          const answer = REVIEW_USE_CODEX
+          const answer = REVIEW_USE_CODEX_EFFECTIVE
             ? await answerWithCodex(jobId, question, repoContext, lineResolver)
             : answerWithRules(question, repoFiles, answers, lineResolver);
 
