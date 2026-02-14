@@ -98,7 +98,12 @@ const specialFilenamePrefixes = ['eslint.config.', '.eslintrc.', '.prettierrc.']
 const normalizedSeverities: ReviewSeverity[] = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO', 'UNKNOWN'];
 const aiFindingSchema = z.object({
   path: z.string().min(1),
-  evidence: z.string().min(1).max(300),
+  // Models sometimes violate the requested evidence length. Truncate instead of failing the whole job.
+  evidence: z
+    .string()
+    .min(1)
+    .max(5000)
+    .transform((value) => value.slice(0, OPENAI_MAX_EVIDENCE_CHARS)),
   severity: z.string().min(1).optional(),
   explanation: z.string().min(1).optional(),
 });
