@@ -1177,33 +1177,71 @@ export const runReviewForJob = async (jobId: string, repoRoot: string): Promise<
     );
     try {
       for (const question of reviewQuestions) {
-        try {
-          logger.info(
-            { jobId, stage: 'REVIEWING', questionId: question.id },
-            'Starting question analysis',
-          );
+        logger.info(
+          { jobId, stage: 'REVIEWING', questionId: question.id },
+          'Starting question analysis',
+        );
 
-          const answer = REVIEW_USE_CODEX_EFFECTIVE
-            ? await answerWithCodex(jobId, question, repoContext, lineResolver)
-            : answerWithRules(question, repoFiles, answers, lineResolver);
-
-          answers.push(answer);
-          logger.info(
-            {
-              jobId,
-              stage: 'REVIEWING',
-              questionId: question.id,
-              severity: answer.severity,
-              findingCount: answer.refs.length,
-            },
-            'Completed question analysis',
-          );
-        } catch (error) {
-          const partialError = new Error('REVIEW_QUESTION_FAILED');
-          (partialError as Error & { partialResults?: ReviewAnswer[] }).partialResults = answers;
-          logger.error({ error, jobId, questionId: question.id }, 'Question review failed');
-          throw partialError;
+        let answer: ReviewAnswer | null = null;
+        if (REVIEW_USE_CODEX_EFFECTIVE) {
+          try {
+            answer = await answerWithCodex(jobId, question, repoContext, lineResolver);
+          } catch (error) {
+            // Codex failures are often transient (network, model output parse). Prefer returning a
+            // best-effort answer from rules to keep the overall review usable/exportable.
+            logger.warn(
+              { error, jobId, questionId: question.id, stage: 'REVIEWING' },
+              'Codex question review failed; falling back to rules engine',
+            );
+            try {
+              const fallback = answerWithRules(question, repoFiles, answers, lineResolver);
+              answer = {
+                ...fallback,
+                answer:
+                  '[Codex unavailable for this question; used rules-based fallback.]\n\n' +
+                  fallback.answer,
+              };
+            } catch (fallbackError) {
+              logger.error(
+                { error: fallbackError, jobId, questionId: question.id, stage: 'REVIEWING' },
+                'Rules fallback failed after Codex failure',
+              );
+            }
+          }
+        } else {
+          try {
+            answer = answerWithRules(question, repoFiles, answers, lineResolver);
+          } catch (error) {
+            logger.error(
+              { error, jobId, questionId: question.id, stage: 'REVIEWING' },
+              'Rules question review failed',
+            );
+          }
         }
+
+        if (!answer) {
+          // Last-resort placeholder so jobs do not fail solely due to a single question error.
+          answer = {
+            id: question.id,
+            title: question.title,
+            category: question.category,
+            severity: 'UNKNOWN',
+            answer: 'Unable to complete analysis for this question due to an internal error.',
+            refs: [],
+          };
+        }
+
+        answers.push(answer);
+        logger.info(
+          {
+            jobId,
+            stage: 'REVIEWING',
+            questionId: question.id,
+            severity: answer.severity,
+            findingCount: answer.refs.length,
+          },
+          'Completed question analysis',
+        );
       }
     } finally {
       lineResolver.clear();
