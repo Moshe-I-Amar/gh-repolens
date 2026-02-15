@@ -28,6 +28,10 @@ export type ReviewAnswer = {
   category: ReviewQuestionCategory;
   severity: ReviewSeverity | string;
   answer: string;
+  // Per-question execution metadata (helps debug fallbacks and mixed engines).
+  reviewEngine?: 'OPENAI' | 'RULES';
+  reviewModel?: string;
+  reviewStatus?: 'OK' | 'FALLBACK' | 'ERROR';
   refs: { path: string; line?: number; endLine?: number }[];
   findings?: ReviewFinding[];
 };

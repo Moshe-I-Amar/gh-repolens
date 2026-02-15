@@ -698,6 +698,9 @@ const answerWithCodex = async (
     category: question.category,
     severity: normalizeSeverity(parsed.severity),
     answer: `${parsed.answer}\n\nVerified code excerpts are attached in findings.`,
+    reviewEngine: 'OPENAI',
+    reviewModel: REVIEW_MODEL,
+    reviewStatus: 'OK',
     refs: resolved.refs.slice(0, 20),
     findings: resolved.verifiedFindings.slice(0, 10),
   };
@@ -1120,6 +1123,8 @@ const answerWithRules = (
     category: question.category,
     severity: assessment.severity,
     answer: assessment.answer,
+    reviewEngine: 'RULES',
+    reviewStatus: 'OK',
     refs: toRefs(assessment.findings),
     findings: assessment.findings.slice(0, 10),
   };
@@ -1200,6 +1205,8 @@ export const runReviewForJob = async (jobId: string, repoRoot: string): Promise<
                 answer:
                   '[Codex unavailable for this question; used rules-based fallback.]\n\n' +
                   fallback.answer,
+                reviewEngine: 'RULES',
+                reviewStatus: 'FALLBACK',
               };
             } catch (fallbackError) {
               logger.error(
@@ -1227,6 +1234,7 @@ export const runReviewForJob = async (jobId: string, repoRoot: string): Promise<
             category: question.category,
             severity: 'UNKNOWN',
             answer: 'Unable to complete analysis for this question due to an internal error.',
+            reviewStatus: 'ERROR',
             refs: [],
           };
         }

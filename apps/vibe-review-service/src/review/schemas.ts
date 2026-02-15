@@ -35,6 +35,9 @@ export const reviewAnswerSchema = z.object({
   category: reviewQuestionCategorySchema,
   severity: z.string().min(1),
   answer: z.string().min(1),
+  reviewEngine: z.enum(['OPENAI', 'RULES']).optional(),
+  reviewModel: z.string().min(1).optional(),
+  reviewStatus: z.enum(['OK', 'FALLBACK', 'ERROR']).optional(),
   refs: z.array(reviewRefSchema),
   findings: z.array(reviewFindingSchema).optional(),
 });

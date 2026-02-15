@@ -31,6 +31,9 @@ type ReviewAnswer = {
   category: string;
   severity: string;
   answer: string;
+  reviewEngine?: 'OPENAI' | 'RULES';
+  reviewModel?: string;
+  reviewStatus?: 'OK' | 'FALLBACK' | 'ERROR';
   refs: ReviewRef[];
   findings?: ReviewFinding[];
 };
@@ -907,6 +910,15 @@ export default function App() {
                       <div className="question-meta">
                         <span>{question.category}</span>
                         <span>Severity: {question.severity}</span>
+                        {question.reviewEngine && (
+                          <span>
+                            Engine: {question.reviewEngine}
+                            {question.reviewEngine === 'OPENAI' && question.reviewModel
+                              ? ` (${question.reviewModel})`
+                              : ''}
+                            {question.reviewStatus ? ` [${question.reviewStatus}]` : ''}
+                          </span>
+                        )}
                       </div>
                       {expanded[question.id] && (
                         <div className="answer">
