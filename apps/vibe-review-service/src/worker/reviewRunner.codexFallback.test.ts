@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { pathToFileURL } from 'node:url';
 
 const createFile = async (root: string, relativePath: string, content: string) => {
   const absolutePath = path.join(root, relativePath);
@@ -34,8 +35,9 @@ test('runReviewForJob completes with rules fallback when Codex request fails', a
     };
 
     // Cache-bust the module so it picks up env vars above (other tests import reviewRunner).
-    const reviewRunnerUrl = new URL('./reviewRunner.js', import.meta.url);
-    reviewRunnerUrl.searchParams.set('t', String(Date.now()));
+    const reviewRunnerPath = path.join(__dirname, 'reviewRunner.js');
+    const reviewRunnerUrl = pathToFileURL(reviewRunnerPath);
+    reviewRunnerUrl.search = `?t=${Date.now()}`;
     const { runReviewForJob } = (await import(reviewRunnerUrl.href)) as typeof import('./reviewRunner');
 
     const answers = await runReviewForJob('job-1', tempRoot);
