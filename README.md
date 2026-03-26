@@ -1,80 +1,164 @@
 # RepoLens
 
-GitHub repo scan platform that ingests a GitHub URL, fetches the repository archive, runs a review workflow, and surfaces results in a web UI.
+**Automated GitHub Repository Analysis Platform**
 
-**Project Overview**
-- User submits a GitHub repo URL in the web client.
-- Intake service validates the URL, creates a job in MongoDB, and publishes a `job.created` message.
-- Repo Fetcher downloads and extracts the repo into a shared workspace, updates the job to `FETCHED`, and publishes `job.fetched`.
-- Vibe Review service loads repository files, asks Codex review prompts, stores results on the job, and marks the job `COMPLETED` (or `FAILED`).
-- Web client polls for jobs and renders review results.
+RepoLens is a self-hosted platform that performs automated code reviews on any public GitHub repository. Submit a repo URL, and the system fetches the source, runs an AI-powered analysis pipeline using OpenAI Codex, and delivers structured findings — including risk scoring, best-practice violations, and actionable improvement suggestions — all accessible through a real-time web dashboard.
 
-**Architecture**
-- `apps/web-client` (Vite + React) polls the intake API.
-- `apps/intake-service` (Express) exposes HTTP endpoints and publishes RabbitMQ messages.
-- `apps/repo-fetcher-service` (worker) consumes `job.created`, fetches and extracts repos, and publishes `job.fetched`.
-- `apps/vibe-review-service` (worker) consumes `job.fetched` and generates/stores review results.
-- Shared MongoDB stores job state; RabbitMQ is the service bus; a shared volume holds fetched repos.
+## Key Features
 
-**Tech Stack**
-- React + Vite: UI, polling, and review display.
-- Express: intake API endpoints.
-- MongoDB + Mongoose: job persistence.
-- RabbitMQ (amqplib): async job pipeline.
-- Node.js + TypeScript: runtime + static typing across services.
-- Pino: structured JSON logging.
-- Docker + Docker Compose: local orchestration.
-- Kubernetes manifests + KEDA: deployment and autoscaling examples.
+- **One-click analysis** — paste a GitHub URL and get a full review without any repo setup.
+- **AI-powered review engine** — leverages OpenAI Codex to evaluate code quality, security patterns, and architecture.
+- **Async job pipeline** — RabbitMQ-driven microservice architecture ensures jobs are processed reliably at scale.
+- **Real-time status tracking** — web UI polls for live progress updates from queued → fetching → reviewing → completed.
+- **Configurable scanning** — control file size limits, extraction timeouts, model selection, and context windows.
+- **Production-ready infrastructure** — ships with Docker Compose for local dev and Kubernetes manifests with KEDA autoscaling for deployment.
 
-**Prerequisites**
-- Node.js 20+ and `pnpm` 9+
-- Docker (for local stack)
-- MongoDB + RabbitMQ (provided by Compose or your own infrastructure)
+## Architecture
 
-**Setup**
-1. Install dependencies:
+```
+┌────────────┐     POST /jobs     ┌─────────────────┐
+│ Web Client │ ──────────────────▶│ Intake Service   │
+│ (React)    │◀── Poll /jobs ─────│ (Express API)    │
+└────────────┘                    └────────┬─────────┘
+                                           │ job.created
+                                    ┌──────▼──────┐
+                                    │  RabbitMQ   │
+                                    └──┬───────┬──┘
+                              job.created│     │job.fetched
+                                 ┌───────▼─┐ ┌─▼──────────────┐
+                                 │ Repo     │ │ Vibe Review    │
+                                 │ Fetcher  │ │ Service        │
+                                 └────┬─────┘ └───────┬────────┘
+                                      │               │
+                                 ┌────▼───────────────▼────┐
+                                 │       MongoDB           │
+                                 │    (Job persistence)    │
+                                 └─────────────────────────┘
+```
+
+| Service | Role |
+|---|---|
+| **web-client** | React + Vite SPA. Submits jobs and polls for results. |
+| **intake-service** | Express API. Validates URLs, creates jobs in MongoDB, publishes `job.created`. |
+| **repo-fetcher-service** | Worker. Downloads and extracts repo archives, publishes `job.fetched`. |
+| **vibe-review-service** | Worker. Runs AI-powered code review via Codex, stores results, marks job `COMPLETED`. |
+
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| Frontend | React, Vite, TypeScript |
+| API | Express, Node.js |
+| Database | MongoDB, Mongoose |
+| Message Bus | RabbitMQ (amqplib) |
+| AI Engine | OpenAI Codex API |
+| Logging | Pino (structured JSON) |
+| Infra | Docker Compose, Kubernetes, KEDA |
+
+## Prerequisites
+
+- **Node.js** 20+
+- **pnpm** 9+
+- **Docker** and **Docker Compose** (for local stack)
+- **OpenAI API key** (for AI-powered reviews)
+
+## Getting Started
+
+### 1. Clone and install
+
 ```bash
+git clone https://github.com/your-org/repolens.git
+cd repolens
 pnpm install
 ```
 
-2. Create local env files (edit values as needed):
+### 2. Configure environment
+
 ```bash
-copy .env.example .env
+# Docker Compose env (required)
+copy infra\docker\.env.example infra\docker\.env
+
+# Service-level env files (if running outside Docker)
 copy apps\intake-service\.env.example apps\intake-service\.env
 copy apps\repo-fetcher-service\.env.example apps\repo-fetcher-service\.env
 copy apps\vibe-review-service\.env.example apps\vibe-review-service\.env
 copy apps\web-client\.env.example apps\web-client\.env
 ```
 
-**Run**
-- Docker Compose (recommended local dev):
+Edit each `.env` file and set your real values — at minimum `OPENAI_API_KEY` and `RABBITMQ_PASS`.
+
+### 3. Run with Docker Compose (recommended)
+
 ```bash
+# Start all services (foreground with logs)
 pnpm dev:compose
+
+# Or start in background
+pnpm dev:compose:up
+
+# Stop all services
+pnpm dev:compose:down
 ```
-- Access UI at `http://localhost:5174` (Compose maps `5174 -> 5173`).
-- Intake API at `http://localhost:3001`.
 
-**Configuration**
-Root and service-level `.env` files control runtime. These are the variables used in code:
-- `PORT` (intake-service): HTTP port. Default `3001`.
-- `MONGODB_URI`: MongoDB connection string.
-- `RABBITMQ_URL`: RabbitMQ connection string.
-- `WORKSPACES_ROOT`: shared directory for repo extraction. Default `/workspaces`.
-- `LOG_LEVEL`: logging level (e.g., `info`, `debug`).
-- `ZIP_SIZE_LIMIT_MB`: max archive size before aborting (repo-fetcher).
-- `ZIP_FILE_COUNT_LIMIT`: max number of extracted files (repo-fetcher).
-- `DOWNLOAD_TIMEOUT_MS`: download timeout in ms (repo-fetcher).
-- `EXTRACT_TIMEOUT_MS`: extraction timeout in ms (repo-fetcher).
-- `REVIEW_TIMEOUT_MS`: review timeout in ms (vibe-review).
-- `REVIEW_USE_CODEX`: enable Codex-backed review (`true`/`false`, default `true`).
-- `REVIEW_MODEL`: model name used by the review worker (default `codex-mini-latest`).
-- `REVIEW_MAX_CONTEXT_CHARS`: max characters of repo content sent to Codex per question.
-- `REVIEW_MAX_FILE_CHARS`: max characters per file included in the Codex prompt.
-- `SCAN_INCLUDE_DEPRIORITIZED`: include lower-priority roots like `docs/`, `tests/`, `examples/` in scan pass 2 (default `false`).
-- `OPENAI_API_KEY`: API key used by the review worker to call Codex.
-- `VITE_API_BASE_URL`: web client API base URL.
+- Web UI: `http://localhost:5174`
+- Intake API: `http://localhost:3001`
+- RabbitMQ Management: `http://localhost:15672`
 
-**API (Intake Service)**
+## Configuration
+
+Root and service-level `.env` files control runtime. Secrets are marked with a lock icon.
+
+**Secrets** (never commit these):
+| Variable | Service | Description |
+|---|---|---|
+| `OPENAI_API_KEY` 🔒 | vibe-review | API key for OpenAI Codex calls |
+| `GITHUB_TOKEN` 🔒 | repo-fetcher | GitHub personal access token for private repos / rate limits |
+| `RABBITMQ_PASS` 🔒 | infra (docker-compose) | RabbitMQ password |
+
+**General:**
+| Variable | Service | Default | Description |
+|---|---|---|---|
+| `PORT` | intake | `3001` | HTTP port |
+| `HEALTH_PORT` | repo-fetcher, vibe-review | — | Health endpoint port |
+| `MONGODB_URI` | all backends | — | MongoDB connection string |
+| `RABBITMQ_URL` | all backends | — | RabbitMQ connection string |
+| `RABBITMQ_USER` | infra | `repolens` | RabbitMQ username |
+| `WORKSPACES_ROOT` | repo-fetcher | `/workspaces` | Shared directory for repo extraction |
+| `LOG_LEVEL` | all backends | `info` | Logging level (`debug`, `info`, `warn`, `error`) |
+| `START_RETRY_DELAY_MS` | all backends | `5000` | Delay before retrying startup connections |
+| `MAX_RETRIES` | repo-fetcher, vibe-review | — | Max message retry attempts |
+| `RETRY_TTL_MS` | repo-fetcher, vibe-review | — | Retry delay between attempts |
+
+**Repo Fetcher:**
+| Variable | Default | Description |
+|---|---|---|
+| `ZIP_SIZE_LIMIT_MB` | `200` | Max archive size before aborting |
+| `ZIP_FILE_COUNT_LIMIT` | `50000` | Max number of extracted files |
+| `DOWNLOAD_TIMEOUT_MS` | `300000` | Download timeout (ms) |
+| `EXTRACT_TIMEOUT_MS` | `300000` | Extraction timeout (ms) |
+| `CLONE_TIMEOUT_MS` | — | Git clone timeout (ms) |
+
+**Vibe Review:**
+| Variable | Default | Description |
+|---|---|---|
+| `REVIEW_TIMEOUT_MS` | `600000` | Review timeout (ms) |
+| `REVIEW_USE_CODEX` | `true` | Enable Codex-backed review |
+| `REVIEW_MODEL` | `codex-mini-latest` | Model name for the review worker |
+| `REVIEW_MAX_CONTEXT_CHARS` | `180000` | Max characters of repo content per question |
+| `REVIEW_MAX_FILE_CHARS` | `4000` | Max characters per file in the Codex prompt |
+| `OPENAI_MAX_FINDINGS` | — | Max findings returned per review |
+| `OPENAI_MAX_EVIDENCE_CHARS` | — | Max evidence characters per finding |
+| `SCAN_INCLUDE_DEPRIORITIZED` | `false` | Include `docs/`, `tests/`, `examples/` in scan |
+
+**Web Client (Vite):**
+| Variable | Description |
+|---|---|
+| `VITE_API_BASE_URL` | Intake API base URL |
+| `VITE_INTAKE_HEALTH_URL` | Intake health endpoint URL |
+| `VITE_FETCHER_HEALTH_URL` | Repo-fetcher health endpoint URL |
+| `VITE_REVIEWER_HEALTH_URL` | Vibe-review health endpoint URL |
+
+## API (Intake Service)
 - `GET /health`
   - Response: `{ "status": "ok" }`
 - `POST /jobs`
@@ -100,7 +184,7 @@ Root and service-level `.env` files control runtime. These are the variables use
 }
 ```
 
-**Project Flow**
+## Project Flow
 ```mermaid
 flowchart TD
   U[User] --> UI[Web Client]
@@ -118,7 +202,7 @@ flowchart TD
   Intake -->|Return Jobs| UI
 ```
 
-**K8s Local (kind/minikube)**
+## K8s Local (kind/minikube)
 1. Build and load images:
 ```bash
 docker build -t repolens/intake-service:local -f apps/intake-service/Dockerfile .
@@ -145,11 +229,13 @@ kind load docker-image repolens/web-client:local
 ./scripts/k8s-down.sh
 ```
 
-**User Guide (Installation & Usage)**
+## User Guide
 See `docs/USER_GUIDE.md` for the full installation, configuration, and end-to-end usage guide.
 
-**License**
+## License
+
 TBD
 
-**Contributing**
+## Contributing
+
 TBD

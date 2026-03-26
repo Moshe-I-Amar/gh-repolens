@@ -42,3 +42,6 @@ workspaces/
 tmp/
 .temp/
 
+# K8s actual secrets (not the .example template)
+infra/k8s/secrets.yaml
+
